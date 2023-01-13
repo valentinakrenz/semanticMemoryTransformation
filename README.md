@@ -1,4 +1,4 @@
-# semanticNatureOfMemoryTransformation
+# semanticMemoryTransformation
 
 This repository includes code and data for the Manuscript "Unraveling the semantic nature of memory transformation", 
 submitted by Valentina Krenz, Arjen Alink, Tobias Sommer, Benno Roozendaal, and Lars Schwabe.
