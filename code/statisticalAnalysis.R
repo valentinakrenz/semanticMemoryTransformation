@@ -5,6 +5,8 @@
 # PACKAGES ####
   #install.packages('readxl')
   library(readxl) #importing data from excel
+  #install.packages("openxlsx")
+  library(openxlsx)
   
   #install.packages("tidyverse")
   library(tidyverse) #prepare data #needs to be loaded after Rmisc
@@ -53,12 +55,10 @@
       
   # main study ####
     # control analyses 
-      controlDf <- read_csv(file.path(file_path, "behav", "controlMeasuresDf.csv"))%>%
+      controlDf <- read_excel(file.path(file_path, "behav", "new_controlMeasuresDf.xlsx"))%>%
                   mutate(delay = factor(delay), 
                          gender = factor(gender), 
                          Name = factor(Name)) 
-      
-      controlDf$delay <- factor(controlDf$delay, levels=c("1", "28"), labels=c("1d","28d"))
     
     # behavioral data 
       behavDf <- read_excel(file.path(file_path, "behav","behavDf.xlsx")) %>%
@@ -77,6 +77,7 @@
         mutate(delay = factor(delay), 
                emotion = factor(emotion, levels=c('neutral','negative')), 
                Name = factor(Name)) 
+      
     
   # pilot study ####
     
@@ -91,7 +92,7 @@
              lureType = factor(lureType, levels = c("new","sem","per")))
     
     # stimulus sets for main study
-    pilotFinalSetsDf <- read_excel(file.path(file_path, "pilot","pilotFinalSetsDf.xlsx")) %>% 
+    pilotFinalSetsDf <- read_excel(file.path(file_path, "pilot","pilotDf.xlsx")) %>% 
       mutate(emotion = factor(emotion),
              Name = factor(Name),
              lureType = factor(lureType, levels = c("new","sem","per"), 
@@ -125,6 +126,9 @@
           strip.text = element_text(size=28, family = "Encode Sans Condensed"),
           strip.background=element_rect(color="white"))   
 
+# CREATE SOURCE DATA FILE ####
+  wb <- createWorkbook("source_data.xlsx")
+  
 # GROUPS DID NOT DIFFER IN ATTENTIVENESS DURING ENCODING (DAY 1)####
   # prepare data ####
   
@@ -196,7 +200,7 @@
 
   # Supplementary Figure 2####
     
-      svg("2a_freeRecall.svg")
+      svg("S1_freeRecall.svg")
       
       plot_data <- freeRecallDf %>% #for connected data points
         mutate(x = case_when(emotion == "neutral" ~ 1 - dodge,
@@ -222,6 +226,15 @@
       
       dev.off()
   
+    # add to source_data ####
+      # Write the data into sheet
+      subset_df <- freeRecallDf 
+      # add new worksheet
+      addWorksheet(wb, "SupplementaryFigure2")
+      # Write the data into sheet
+      writeData(wb, "SupplementaryFigure2", subset_df)
+
+      
 # DELAY DEPENDENT INCREASE IN HITS OVER TIME (DAY 2) #####
   # prepare data####
     # reduce dataframe 
@@ -231,7 +244,6 @@
     # compute percent 
       oldsDf[,c("hit","miss","missedResponse")] <- oldsDf[,c("hit","miss"
                                                              ,"missedResponse")] /30*100
-  
   # analyze data ####
     # descriptive statistics 
       psych::describeBy(hit ~ delay, 
@@ -351,6 +363,12 @@
         my_theme
       dev.off()
   
+    # add to source_data ####
+      addWorksheet(wb, "Figure2A_left")
+      # Write the data into sheet
+      subset_df <- subset(oldsDf, select = c("Name", "delay", "emotion", "hit"))
+      writeData(wb, "Figure2A_left", subset_df)
+      
   # Supplementary Table 1 ####
     # old items 
       # reduce data frame
@@ -370,6 +388,23 @@
       luresRawDf$itemType <- factor(luresRawDf$itemType, levels = c("per", "sem", "new"))
       # show descriptive statistics for lures
       psych::describeBy(cbind(CR, FA, missedResponse) ~ emotion + delay +  itemType, data = luresRawDf)  
+      
+    # add to source_data ####
+      # old items
+      addWorksheet(wb, "SupplementaryTable2_oldItems")
+      # Write the data into sheet
+      writeData(wb, "SupplementaryTable2_oldItems", oldRawDf)
+      
+      # lures
+      subset_df <- luresRawDf
+      # Define a named character vector of old and new level names
+      level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+      # Use the plyr package's mapvalues function to rename levels
+      subset_df$lureType <- plyr::mapvalues(subset_df$itemType, from = names(level_names), to = level_names)
+      # add worksheet
+      addWorksheet(wb, "SupplementaryTable2_lures")
+      # Write the data into sheet
+      writeData(wb, "SupplementaryTable2_lures", subset_df)
       
 # DELAY DEPENDENT INCREASE IN FALSE ALARMS SPECIFICALLY FOR SEMANTICALLY RELATED LURES (DAY 2) ####
   # prepare data ####
@@ -560,7 +595,7 @@
     
   # Figure 2A right####
       
-    svg("Figure2B_unrelatedLures.svg")
+    svg("Figure2A_unrelatedLures.svg")
     
     plot_data <- luresDf %>% 
       filter(lureType == "new")%>% 
@@ -587,7 +622,7 @@
     
     dev.off()
   
-    svg("Figure2B_perceptuallyRelatedLures.svg")
+    svg("Figure2A_perceptuallyRelatedLures.svg")
     
     plot_data <- luresDf %>% 
       filter(lureType == "per") %>% 
@@ -611,7 +646,7 @@
     
     dev.off()
   
-  svg("Figure2B_semanticallyRelatedLures.svg")
+  svg("Figure2A_semanticallyRelatedLures.svg")
   
   plot_data <- luresDf %>% 
     filter(lureType == "sem") %>% 
@@ -644,6 +679,16 @@
   dev.off()
   
 
+  # add to source_data ####
+    # Write the data into sheet
+    subset_df <- subset(luresDf, select = -itemType)
+    # Define a named character vector of old and new level names
+    level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+    # Use the plyr package's mapvalues function to rename levels
+    subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+    # add to source_data
+    addWorksheet(wb, "Figure2A_right")
+    writeData(wb, "Figure2A_right", subset_df)
   # Supplementary Results #####
     # false alarms weighted by confidence ####
       # preprare data 
@@ -784,8 +829,18 @@
     dev.off()
   
   
+    # write into source_data ####
+      # Write the data into sheet
+      subset_df <- luresWeightedDf[, c("Name", "delay", "emotion", "lureType","FA_weighted")]
+      # Define a named character vector of old and new level names
+      level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+      # Use the plyr package's mapvalues function to rename levels
+      subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+      # add to source_data
+      addWorksheet(wb, "SupplementaryFigure6")
+      writeData(wb, "SupplementaryFigure6", subset_df)
+      
     # confidency of FAs ####
-    
       # semantically related lures 
         # prepare data
           semConfDf <- subset(behavDf, itemType == 'sem') %>%
@@ -1062,6 +1117,28 @@
   
   dev.off()
 
+  # write into source_data ####
+    # Write the data into sheet
+    subset_df <- smaller_transformationDf %>% # before percentage was computed
+      dplyr::rename(semantically_transformed = semOnly_transformed, perceptually_transformed = perOnly_transformed) %>%
+      dplyr::select(Name, delay, emotion, perceptually_transformed, semantically_transformed, forgotten, detailed)
+    
+    # for supplementary table
+      addWorksheet(wb, "SupplementaryTable3")
+      writeData(wb, "SupplementaryTable3", subset_df)
+  
+    # for Figure 2B
+      subset_df[,c("detailed", "forgotten", 
+               "semantically_transformed", 
+                "perceptually_transformed")] <- subset_df[,c("detailed", 
+                                                             "forgotten", 
+                                                             "semantically_transformed", 
+                                                             "perceptually_transformed")] / 30 *100
+  
+      # add to source_data
+      addWorksheet(wb, "Figure2B")
+      writeData(wb, "Figure2B", subset_df)
+  
 # RELATEDNESS RATING ON DAY 3####
   # prepare data ####
     smaller_simRatingsDf <- subset(behavDf, itemType != "old") %>%
@@ -1080,6 +1157,17 @@
       
       psych::describeBy(percRating ~ lureType, data = meanDf)
       psych::describeBy(semRating ~ lureType, data = meanDf)
+    # Write to source data file ####
+      subset_df <- smaller_simRatingsDf %>%
+        dplyr::rename(perceptual_relatedness = percRating, semantic_relatedness = semRating) %>%
+        dplyr::select(Name, delay, emotion, lureType, perceptual_relatedness, semantic_relatedness)
+      # Define a named character vector of old and new level names
+      level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+      # Use the plyr package's mapvalues function to rename levels
+      subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+      
+      addWorksheet(wb, "SupplementaryTable1")
+      writeData(wb, "SupplementaryTable1", subset_df)
       
       # analyze semantic relatedness rating #####
         # run ANOVA 
@@ -1365,7 +1453,18 @@
         my_theme 
       
       dev.off()
-  
+      
+    # Write to source data file ####
+      
+      subset_df <- meanDf %>%
+        dplyr::rename(perceptual_relatedness = percRating, semantic_relatedness = semRating) 
+      # Define a named character vector of old and new level names
+      level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+      # Use the plyr package's mapvalues function to rename levels
+      subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+      
+      addWorksheet(wb, "Figure2C_left")
+      writeData(wb, "Figure2C_left", subset_df)
   # Supplementary Figure 3 ####
   svg("SupplFig7_distributionOfRating.svg", height=10, width=5) 
     
@@ -1404,6 +1503,18 @@
               strip.background=element_rect(color="white"))
     
   dev.off()
+  
+  # Write to source data file ####
+    subset_df <- smaller_simRatingsDf %>%
+      dplyr::rename(perceptual_relatedness = percRating, semantic_relatedness = semRating) %>%
+      dplyr::select(Name, delay, emotion, lureType, perceptual_relatedness, semantic_relatedness)
+    # Define a named character vector of old and new level names
+    level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+    # Use the plyr package's mapvalues function to rename levels
+    subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+  
+    addWorksheet(wb, "SupplementaryFigure3")
+    writeData(wb, "SupplementaryFigure3", subset_df)
 # INCREASE IN PROBABILITY FOR A FALSE ALARM ON DAY 2 DEPENDING ON RELATEDNESS RATING ON DAY 3 ####
   # prepare data ####
     # long file for LMM
@@ -1478,6 +1589,19 @@
         my_theme
       
       dev.off()
+    
+  # Write into source_data ####
+    subset_df <- simRatingsDf %>%
+      dplyr::rename(perceptual_relatedness_centered = percRatingGroupMeanCent, semantic_relatedness_centered = semRatingGroupMeanCent) %>%
+      dplyr::select(Name, delay, emotion, lureType, stimulusTypeNum, perceptual_relatedness_centered, semantic_relatedness_centered)
+      
+    # Define a named character vector of old and new level names
+    level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
+    # Use the plyr package's mapvalues function to rename levels
+    subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+    
+    addWorksheet(wb, "Figure2C_right")
+    writeData(wb, "Figure2C_right", subset_df)
     
 # FA FOR SEMANTICALLY RELATED LURES LOW VS HIGH IN SEMANTIC RELATEDNESS ####
   #median split
@@ -1972,7 +2096,18 @@
             my_theme
           
           dev.off()
-      
+      # save to source_data #####
+        subset_df <- longaxisL_modelRSADf[!(longaxisL_modelRSADf$Name=="sj07"),] %>%
+          dplyr::rename(anterior_hippocampus = anteriorHC_L, posterior_hippocampus = posteriorHC_L) 
+          
+          # Define a named character vector of old and new level names
+          level_names <- c("anteriorHC_L" = "anterior_hippocampus", "posteriorHC_L" = "posterior_hippocampus")
+          # Use the plyr package's mapvalues function to rename levels
+          subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+        
+        addWorksheet(wb, "Figure3B")
+        writeData(wb, "Figure3B", subset_df)
+        
     # RIGHT HIPPOCAMPUS ####
       # prepare data ####
         longaxisR_modelRSADf <- modelRSADf %>% 
@@ -2359,6 +2494,12 @@
         
         dev.off()
       
+      # save to source_data ####
+        subset_df <- modelRSADf[, 2:6] %>% # copy second to third column into new df
+        dplyr::rename(fit_in_neocorticalMemoryROI = neocorticalMemoryROI) 
+        
+        addWorksheet(wb, "Figure3C_upperPanel")
+        writeData(wb, "Figure3C_upperPanel", subset_df)
     # individual ROIs ####
       # vmPFC ####
         vmPFC.ANOVA <- aov_ez(
@@ -2582,6 +2723,17 @@
         
         dev.off()
         
+      # save to source_data ####
+        subset_df <- subset(modelRSADf, model == "model2") %>% 
+                    dplyr::select(Name, model, emotion, delay, 
+                                  vmPFC, aCC, IFG, Precuneus, angularGyrus_L, angularGyrus_R) %>%
+                    pivot_longer(cols = c(vmPFC, aCC, IFG, Precuneus, angularGyrus_L, angularGyrus_R),
+                                        names_to = "ROI",
+                                  values_to = "fit") 
+        
+        addWorksheet(wb, "Figure3C_lowerPanel")
+        writeData(wb, "Figure3C_lowerPanel", subset_df)
+        
     # sensory control ROIs #####
       # occipital pole ####
       
@@ -2725,6 +2877,19 @@
             
             dev.off()
           
+        # add to source data file ####
+          subset_df <- longaxisL_ERSDf %>%
+              aggregate(ERS ~ Name + delay + emotion + longaxis, 
+                        FUN = mean)
+          
+          # rename levels to make it consistent with previous sheet
+          level_names <- c("anterior" = "anterior_hippocampus", "posterior" = "posterior_hippocampus")
+          # Use the plyr package's mapvalues function to rename levels
+          subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+            
+          addWorksheet(wb, "Figure4_upperPanel")
+          writeData(wb, "Figure4_upperPanel", subset_df)
+          
       # association of remote posterior ERS with memory semantization #####
         # prepare data ####
           postHCERSDf <- subset(mergedERSDf, longaxis == "posterior")
@@ -2776,6 +2941,14 @@
             
             dev.off()
         
+        # add to source data file ####
+            subset_df <- postHCERSDf %>%
+              dplyr::select(Name, emotion, delay, set, ERS, sem_FA) %>%
+              dplyr::rename(posteriorHippocampal_ERS = ERS) 
+
+            addWorksheet(wb, "Figure4_lowerPanel")
+            writeData(wb, "Figure4_lowerPanel", subset_df)
+            
         # additional analyses ####
           # hits
             glmm <- glmer(hit ~ ERS*emotion*delay +
@@ -2813,7 +2986,14 @@
               my_theme
             
             dev.off()
-        
+          # add to source data file ####
+            subset_df <- postHCERSDf %>%
+              dplyr::select(Name, emotion, delay, set, ERS, detailed) %>%
+              dplyr::rename(posteriorHippocampal_ERS = ERS) 
+            
+            addWorksheet(wb, "SupplementaryFigure4")
+            writeData(wb, "SupplementaryFigure4", subset_df)
+            
     # right hippocampus #####
       # prepare data ####
         longaxisR_ERSDf <- subset(reinstatementDf, itemType == 'old' & EncRuns == 'AllEncRuns') %>%
@@ -2841,6 +3021,7 @@
                                                names_to="longaxis",
                                                values_to = "EncSemSim")%>%
                                   mutate(longaxis = factor(longaxis))
+        
     # analyze data ####
       # run LMM    
         LMM <- lmer(EncSemSim ~ delay*emotion*longaxis +
@@ -2882,6 +3063,19 @@
       
       dev.off()
   
+    # add to source data file ####
+      subset_df <- longaxisL_EncSemSimDf %>%
+        aggregate(EncSemSim ~ Name + delay + emotion + longaxis, FUN = mean) %>%
+        dplyr::rename(reinstatementBySemanticallyRelatedLures = EncSemSim) 
+      
+      # rename levels to make it consistent with previous sheets
+      level_names <- c("anterior" = "anterior_hippocampus", "posterior" = "posterior_hippocampus")
+      # Use the plyr package's mapvalues function to rename levels
+      subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+      
+      addWorksheet(wb, "SupplementaryFigure5")
+      writeData(wb, "SupplementaryFigure5", subset_df)
+      
   # reinstatement by PERCEPTUALLY related stimuli ####
     # prepare data ####
       longaxisL_EncPercSimDf <-  subset(reinstatementDf, itemType == 'per' & EncRuns == 'AllEncRuns') %>%
@@ -3058,27 +3252,43 @@
     with(controlDf, cohensD(STAI_Trait_SUM ~ delay, method="unequal"))
     
     #PSQI
-    PSQI_file <- controlDf %>%
-      select(Name, delay, PSQI_comp1_sleepquality_28d, PSQI_24h_SUM,PSQI_24h_4, PSQI_24h_6) %>%
-      drop_na()
-    
-    psych::describeBy(PSQI_file$PSQI_24h_SUM , group = PSQI_file$delay)
     
     #28d
+    
+    #24h
     with(controlDf, t.test(PSQI_28d_SUM ~ delay))
     with(controlDf, cohensD(PSQI_28d_SUM ~ delay, method="unequal"))
     
-    #24h
-    with(controlDf, t.test(PSQI_24h_SUM ~ delay))
-    with(controlDf, cohensD(PSQI_24h_SUM ~ delay, method="unequal"))
+    psych::describeBy(controlDf$PSQI_28d_SUM , group = controlDf$delay)
     
     #24h - sleep duration
     with(controlDf, t.test(PSQI_24h_4 ~ delay))
     with(controlDf, cohensD(PSQI_24h_4 ~ delay, method="unequal"))
     
+    psych::describeBy(controlDf$PSQI_24h_4 , group = controlDf$delay)
+    
     #24h - sleep quality
     with(controlDf, t.test(PSQI_24h_6 ~ delay))
     with(controlDf, cohensD(PSQI_24h_6 ~ delay, method="unequal"))
+    
+    psych::describeBy(controlDf$PSQI_24h_6 , group = controlDf$delay)
+    
+    # write to source data file ####
+    # add to source data file ####
+    subset_df <- controlDf %>%
+      dplyr::select(Name, delay, STAI_State_SUM, STAI_Trait_SUM,
+                    PSQI_28d_SUM, PSQI_24h_4, PSQI_24h_6, 
+                    BDI_SUM, TICS_SSCS) %>%
+      dplyr::rename(state_anxiety = STAI_State_SUM,
+                    trait_anxiety = STAI_Trait_SUM,
+                    PSQI_globalScore_28d = PSQI_28d_SUM, 
+                    PSQI_sleepQuality_24h = PSQI_24h_4, 
+                    PSQI_sleepLatency_24h = PSQI_24h_6,
+                    depressiveMood = BDI_SUM, 
+                    subjectiveChronicStress = TICS_SSCS) 
+    
+    addWorksheet(wb, "SupplementaryTable4")
+    writeData(wb, "SupplementaryTable4", subset_df)
     
 # BEHAVIORAL PILOT####
   # sociodemographics ####
@@ -3236,3 +3446,13 @@
         my_theme
       dev.off()
   
+
+    # save to source data file ####
+      subset_df <- pilotFinalSetsDf
+      
+      addWorksheet(wb, "SupplementaryFigure1")
+      writeData(wb, "SupplementaryFigure1", subset_df)
+
+      # Save the workbook
+      saveWorkbook(wb, "source_data.xlsx", overwrite=TRUE)
+      
