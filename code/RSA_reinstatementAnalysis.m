@@ -1,16 +1,34 @@
-%CODE USED TO COMPUTE THE ENCODING-RETRIEVAL-SIMILARITY AS REPORTED IN THE MANUSCRIPT 
-%"UNRAVELING THE SEMANTIC NATURE OF MEMORY OVER TIME" 
-%by Valentina Krenz, Arjen Alink, Tobias Sommer, Benno Roozendaal, Lars Schwabe
-%submitted 2022
+%% MEMORY REINSTATEMENT ANALYSIS
+% CORRELATES ACTIVIATION PATTERNS OF EACH ITEM AT ENCODING WITH
+% ACTIVATION PATTERNS OF OLD ITEMS AT MEMORY TESTING
 
-%script drafted by Arjen Alink, adapted by Valentina Krenz
+% CODE FOR THE MANUSCRIPT "UNRAVELING THE SEMANTIC NATURE OF MEMORY OVER TIME" 
+% by Valentina Krenz, Arjen Alink, Tobias Sommer, Benno Roozendaal, Lars Schwabe
+% submitted 2022
 
-%CORRELATES ACTIVIATION PATTERNS OF EACH ITEM AT ENCODING WITH
-%ACTIVATION PATTERNS 
+%% requirements: 
+% NIfTI_tools: https://www.mathworks.com/matlabcentral/fileexchange/8797-tools-for-nifti-and-analyze-image
+% Statistics and Machine Learning Toolbox: https://de.mathworks.com/products/statistics.html
 
+%% path settings 
+% addpath to your Nifti tools folder
+addpath NiftiTools/
+% path to parentfolder with your timages
+betaDir='/data/timages/'; 
+% naming convention of subfolders with subject data
+SJfolders=dir([betaDir 'MemTrans*']);
+% number of subjects
+nSjs=numel(SJfolders);
+% path to subsubfoder to beta or t images of each subject
+SubFolder='/GLM/';
+% number of beta or t images
+nrBetaMaps=420; 
+% path to your ROIs
+ROIdir='/data/ROIs/HC_longaxis/';
+% get ROI names
+RoiNames=dir([ROIdir  '*.nii']);
 
-%% order of timages per condition
-
+%% RSM indices per stimulus type
 % 1:30 encoding1 negative
 % 31:60 encoding1 neutral
 
@@ -32,26 +50,7 @@
 % 361:390 unrelared negative
 % 391:420 unrelated neutral
 
-
-%% PREPARE AND READ IN DATA 
-addpath NiftiTools/
-
-betaDir= 'YOURPATH\tImages\'; %change to yourpath
-ROIdir= 'YOURPATH\code\ROIs\mainROIs\';  %change to yourpath
-
-%SubFolder='/oneGLMforRSA/';
-SJfolders=dir([betaDir 'sj*']);
-nSjs=numel(SJfolders);
-
-nrBetaMaps=420; 
-RoiNames=dir([ROIdir  '*.nii']);
-nRois=numel(RoiNames);
-
-ROIdata=struct();
-ROInames=cell(nRois,1);
-
-%% RSM indices per stimulus type
-
+%% define condition indices
 Contrasts=struct();
 
 Contrasts.ERSNeg=NaN(nrBetaMaps);%neg
@@ -94,6 +93,13 @@ for EncIm=1:30
     Contrasts.ESSNeu(ImInds_Neg,EncIm+330)=1;%Reinstatement by semantically related lures neut
 end
 
+%% prepare struct to store RSM for each ROI
+% get number of ROIs
+nRois=numel(RoiNames);
+% initiate ROInames cell
+ROInames=cell(nRois,1);
+% initiate struct for RSM data per subject ROI and beta image
+ROIdata=struct();
 for r=1:nRois
     ROI=load_nii([ROIdir RoiNames(r).name]);
     ROIdata.([RoiNames(r).name(1:end-4) '_Inds'])=find(ROI.img);
@@ -101,11 +107,12 @@ for r=1:nRois
     ROInames{r}=RoiNames(r).name(1:end-4);
 end
 
+%% read in beta images and compute RSMs for each ROI
 for sj=1:nSjs   
     sj
     tic
     betaPath=[betaDir,SJfolders(sj).name];
-    betaFiles=dir([betaPath, 'spm*.nii']);
+    betaFiles=dir([betaPath, 'spmT*.nii']); %take only t images %change this if you want to analyze beta image
     for b=1:numel(betaFiles)
         betaDat=load_nii([betaPath,betaFiles(b).name]);
         if b==1
@@ -121,10 +128,12 @@ for sj=1:nSjs
     toc
 end
 
+%% prepare output table
 AllContrastNames=fields(Contrasts);
 Means=zeros(numel(AllContrastNames),1);
 OPinTable=table();
-        
+
+%% fill output table with Fisher z-transformed data of each sj, ROI and stimulus
 for roi=1:nRois
     roiRSMs=ROIdata.([ROInames{roi} '_RSMs']);
     for ctr=1:numel(AllContrastNames)      
@@ -134,6 +143,7 @@ for roi=1:nRois
     end
 end
 
+%% export results
 writetable(OPinTable,'RSA_MemoryReinstatement_mainROIs.csv')
 
 
