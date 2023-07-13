@@ -55,35 +55,40 @@
       
   # main study ####
     # control analyses 
-      controlDf <- read_excel(file.path(file_path, "behav", "new_controlMeasuresDf.xlsx"))%>%
+      controlDf <- read_excel(file.path(file_path, "behav", "controlMeasuresDf.xlsx"))%>%
                   mutate(delay = factor(delay), 
-                         gender = factor(gender), 
+                         sex = factor(sex), 
                          Name = factor(Name)) 
     
     # behavioral data 
       behavDf <- read_excel(file.path(file_path, "behav","behavDf.xlsx")) %>%
                   mutate(emotion = factor(emotion, levels = c("neutral","negative")),
                          delay = factor(delay))
+      # add sex to data frame to include in source data frame    
+      behavDf <- merge(behavDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
     # model RSA data 
       modelRSADf <- read_excel(file.path(file_path, "neuro", 'modelRSADf.xlsx')) %>% 
                      mutate(emotion = factor(emotion, levels=c('neutral','negative')),
                              Name = factor(Name), 
                              model = factor(model),
-                             delay = factor(delay)) 
+                             delay = factor(delay))
+      # add sex to data frame to include in source data frame    
+      modelRSADf <- merge(modelRSADf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
     # reinstatement data
       reinstatementDf <- read_excel(file.path(file_path, "neuro", "reinstatementDf.xlsx")) %>% 
         mutate(delay = factor(delay), 
                emotion = factor(emotion, levels=c('neutral','negative')), 
                Name = factor(Name)) 
+      # add sex to data frame to include in source data frame    
+        reinstatementDf <- merge(reinstatementDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
-    
   # pilot study ####
     
     # sociodemography
     pilotDemoBeforeExclusionDf <- read_excel(file.path(file_path, "pilot","pilotDemoDf.xlsx")) %>%
-      mutate(gender = factor(gender))
+      mutate(sex = factor(gender))
     
     # all stimulus sets in pilot
     pilotAllSetsDf <- read_excel(file.path(file_path, "pilot","pilotAllSetsDf.xlsx")) %>% 
@@ -92,15 +97,16 @@
              lureType = factor(lureType, levels = c("new","sem","per")))
     
     # stimulus sets for main study
-    pilotFinalSetsDf <- read_excel(file.path(file_path, "pilot","pilotDf.xlsx")) %>% 
+    pilotFinalSetsDf <- read_excel(file.path(file_path, "pilot","pilotFinalSetsDf.xlsx")) %>% 
       mutate(emotion = factor(emotion),
              Name = factor(Name),
              lureType = factor(lureType, levels = c("new","sem","per"), 
                                labels = c("unrelated","semantically related","perceptually related")),
              ratingScale = factor(ratingScale, levels = c("Per","Sem"), 
                                   labels = c("perceptual relatedness", "semantic relatedness"))) %>%
-      aggregate(rating ~ Name + emotion + lureType + ratingScale, FUN = mean)
-    
+             aggregate(rating ~ Name + emotion + lureType + ratingScale, FUN = mean) # include sex for source data file
+    # add sex to data frame to include in source data frame    
+    pilotFinalSetsDf <- merge(pilotFinalSetsDf, pilotDemoBeforeExclusionDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
     
 # FIGURE SETTINGS #####
   
@@ -133,13 +139,13 @@
   # prepare data ####
   
     longerEncRunDf <- controlDf %>%
-                      dplyr::select(Name, delay, EncodingRun1_noAnswer, EncodingRun2_noAnswer, EncodingRun3_noAnswer)%>%
-                      pivot_longer(cols = c(EncodingRun1_noAnswer, EncodingRun2_noAnswer, EncodingRun3_noAnswer),
+                      dplyr::select(Name, delay, EncodingRun1_missedResponse, EncodingRun2_missedResponse, EncodingRun3_missedResponse)%>%
+                      pivot_longer(cols = c(EncodingRun1_missedResponse, EncodingRun2_missedResponse, EncodingRun3_missedResponse),
                                             names_to = "run", # define new factor run
                                             values_to = "missedResponse")%>% # name values
                       mutate(run = factor(run, #define run factor and rename levels
-                                          levels=c('EncodingRun1_noAnswer', 'EncodingRun2_noAnswer', 
-                                                   'EncodingRun3_noAnswer'),
+                                          levels=c('EncodingRun1_missedResponse', 'EncodingRun2_missedResponse', 
+                                                   'EncodingRun3_missedResponse'),
                                           labels=c('run1', 'run2', 'run3'))) 
   
   # analyze data ####
@@ -227,13 +233,12 @@
       dev.off()
   
     # add to source_data ####
-      # Write the data into sheet
-      subset_df <- freeRecallDf 
+      # add sex to data frame to include in source data frame    
+      subset_df <- merge(freeRecallDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file 
       # add new worksheet
       addWorksheet(wb, "SupplementaryFigure2")
       # Write the data into sheet
       writeData(wb, "SupplementaryFigure2", subset_df)
-
       
 # DELAY DEPENDENT INCREASE IN HITS OVER TIME (DAY 2) #####
   # prepare data####
@@ -367,6 +372,7 @@
       addWorksheet(wb, "Figure2A_left")
       # Write the data into sheet
       subset_df <- subset(oldsDf, select = c("Name", "delay", "emotion", "hit"))
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file 
       writeData(wb, "Figure2A_left", subset_df)
       
   # Supplementary Table 1 ####
@@ -393,10 +399,11 @@
       # old items
       addWorksheet(wb, "SupplementaryTable2_oldItems")
       # Write the data into sheet
-      writeData(wb, "SupplementaryTable2_oldItems", oldRawDf)
+      subset_df <- merge(oldRawDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file 
+      writeData(wb, "SupplementaryTable2_oldItems", subset_df)
       
       # lures
-      subset_df <- luresRawDf
+      subset_df <- merge(luresRawDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
       # Define a named character vector of old and new level names
       level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
       # Use the plyr package's mapvalues function to rename levels
@@ -836,10 +843,10 @@
       level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
       # Use the plyr package's mapvalues function to rename levels
       subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
       # add to source_data
       addWorksheet(wb, "SupplementaryFigure6")
       writeData(wb, "SupplementaryFigure6", subset_df)
-      
     # confidency of FAs ####
       # semantically related lures 
         # prepare data
@@ -1122,7 +1129,8 @@
     subset_df <- smaller_transformationDf %>% # before percentage was computed
       dplyr::rename(semantically_transformed = semOnly_transformed, perceptually_transformed = perOnly_transformed) %>%
       dplyr::select(Name, delay, emotion, perceptually_transformed, semantically_transformed, forgotten, detailed)
-    
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+  
     # for supplementary table
       addWorksheet(wb, "SupplementaryTable3")
       writeData(wb, "SupplementaryTable3", subset_df)
@@ -1398,7 +1406,7 @@
         
 
 
-  # Figure 2C left ####
+  # Figure 3a ####
     # prepare data 
       # stack rating categories to the new variable ratingType with the value named rating
       plot_data <- meanDf %>% # make sure to run the new meanDf first
@@ -1416,7 +1424,7 @@
                           ))
         
     # plot
-      svg("Figure2Cleft.svg")
+      svg("Figure3a.svg")
       
       p <- ggplot (data=plot_data, aes(x=lureType, y=rating, fill=ratingType))+   
         stat_summary(fun='mean',geom='bar', position=position_dodge())+
@@ -1462,9 +1470,9 @@
       level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
       # Use the plyr package's mapvalues function to rename levels
       subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
-      
-      addWorksheet(wb, "Figure2C_left")
-      writeData(wb, "Figure2C_left", subset_df)
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+      addWorksheet(wb, "Figure3a")
+      writeData(wb, "Figure3a", subset_df)
   # Supplementary Figure 3 ####
   svg("SupplFig7_distributionOfRating.svg", height=10, width=5) 
     
@@ -1512,7 +1520,8 @@
     level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
     # Use the plyr package's mapvalues function to rename levels
     subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
-  
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+    
     addWorksheet(wb, "SupplementaryFigure3")
     writeData(wb, "SupplementaryFigure3", subset_df)
 # INCREASE IN PROBABILITY FOR A FALSE ALARM ON DAY 2 DEPENDING ON RELATEDNESS RATING ON DAY 3 ####
@@ -1559,10 +1568,10 @@
                                          optCtrl=list(maxfun=2e5))) 
       summary(glmm) # no change
       
-  # Figure 2C right panel #####
+  # Figure 3b #####
     # perceptual relatedness 
  
-      svg("Figure2CRight_perceptualRelatedness.svg")
+      svg("Figure3b_perceptualRelatedness.svg")
       
       p <- plot_model(glmm_groupMeanCent, type = "pred", terms = c("percRatingGroupMeanCent","emotion","delay"),
                       show.data = FALSE, value.offset = TRUE, jitter = TRUE, 
@@ -1570,7 +1579,6 @@
                       axis.title = c("perceptual relatedness","% false alarms in delayed recognition"), #set x-and y-axis title
                       colors = c("azure4", "firebrick4")) + 
         p + 
-        ggMarginal(p, type="density")
         coord_cartesian( ylim = c(0, 0.16)) +
        my_theme
         
@@ -1578,7 +1586,7 @@
       
     # semantic relatedness 
     
-      svg("Figure2CRight_semanticRelatedness.svg")
+      svg("Figure3b_semanticRelatedness.svg")
         
       p <- plot_model(glmm_groupMeanCent, type = "pred", terms = c("semRatingGroupMeanCent","emotion","delay"), 
                       dot.size = 4, grid = FALSE, line.size = 3, 
@@ -1599,9 +1607,10 @@
     level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
     # Use the plyr package's mapvalues function to rename levels
     subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
     
-    addWorksheet(wb, "Figure2C_right")
-    writeData(wb, "Figure2C_right", subset_df)
+    addWorksheet(wb, "Figure3b")
+    writeData(wb, "Figure3b", subset_df)
     
 # FA FOR SEMANTICALLY RELATED LURES LOW VS HIGH IN SEMANTIC RELATEDNESS ####
   #median split
@@ -1956,7 +1965,7 @@
                                                      & model=="model2" & emotion=="neutral"],
                                              method = 'unequal'))
         
-        # Figure 3B ####
+        # Figure 4b ####
           #drop outlier for whole plot as it is also dropped for the ANOVA 
           #don't run this line if you want to see data with outlier
           data<-data[!(data$Name=="sj07"),] 
@@ -2097,16 +2106,18 @@
           
           dev.off()
       # save to source_data #####
-        subset_df <- longaxisL_modelRSADf[!(longaxisL_modelRSADf$Name=="sj07"),] %>%
-          dplyr::rename(anterior_hippocampus = anteriorHC_L, posterior_hippocampus = posteriorHC_L) 
+        subset_df <- longaxisL_modelRSADf[!(longaxisL_modelRSADf$Name=="sj07"),] 
           
-          # Define a named character vector of old and new level names
-          level_names <- c("anteriorHC_L" = "anterior_hippocampus", "posteriorHC_L" = "posterior_hippocampus")
-          # Use the plyr package's mapvalues function to rename levels
-          subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+        # Define a named character vector of old and new level names
+        level_names <- c("anteriorHC_L" = "anterior_hippocampus", "posteriorHC_L" = "posterior_hippocampus")
+        # Use the plyr package's mapvalues function to rename levels
+        subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
         
-        addWorksheet(wb, "Figure3B")
-        writeData(wb, "Figure3B", subset_df)
+        subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+        
+        
+        addWorksheet(wb, "Figure4B")
+        writeData(wb, "Figure4B", subset_df)
         
     # RIGHT HIPPOCAMPUS ####
       # prepare data ####
@@ -2402,11 +2413,11 @@
       
           # no outlier!
           
-      # Figure 3C upper panel #####
+      # Figure 5 upper panel #####
       
         my_y_title <- expression(paste("Fisher transformed", italic(" rho")))
         
-        svg("Figure3C_neocort_model1.svg")
+        svg("Figure5_neocort_model1.svg")
         
         plot_data <- behavDf_model1 %>%
           mutate(x = case_when(
@@ -2434,7 +2445,7 @@
         dev.off()
         
         
-        svg("Figure3C_neocort_model2.svg")
+        svg("Figure5_neocort_model2.svg")
         
         plot_data <- behavDf_model2 %>%
           mutate(x = case_when(
@@ -2466,7 +2477,7 @@
         dev.off()
       
         
-        svg("Figure4C_neocort_model3.svg")
+        svg("Figure5_neocort_model3.svg")
         
         plot_data <- behavDf_model3 %>%
                       mutate(x = case_when(
@@ -2495,11 +2506,12 @@
         dev.off()
       
       # save to source_data ####
-        subset_df <- modelRSADf[, 2:6] %>% # copy second to third column into new df
+        subset_df <- modelRSADf[, 1:6] %>% # copy second to third column into new df
         dplyr::rename(fit_in_neocorticalMemoryROI = neocorticalMemoryROI) 
+        subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
         
-        addWorksheet(wb, "Figure3C_upperPanel")
-        writeData(wb, "Figure3C_upperPanel", subset_df)
+        addWorksheet(wb, "Figure5_upperPanel")
+        writeData(wb, "Figure5_upperPanel", subset_df)
     # individual ROIs ####
       # vmPFC ####
         vmPFC.ANOVA <- aov_ez(
@@ -2599,7 +2611,7 @@
                              y = Precuneus[delay=="28d"]), 
                               method = "unequal")
         
-      # Figure 4C lower panel #####
+      # Figure 5 lower panel #####
         plot_data <- subset(modelRSADf, model == "model2") %>%
           mutate(x = case_when(
             delay == "1d" & emotion == "neutral" ~ 1 - dodge,
@@ -2608,7 +2620,7 @@
             delay == "28d" & emotion == "negative" ~ 2 + dodge,
           ))
         
-        svg("Figure4C_Precuneus.svg")
+        svg("Figure5_Precuneus.svg")
         
         p <- ggplot (data=plot_data, aes(x=delay, y=Precuneus, fill=emotion))+
           stat_summary(fun='mean',geom='bar', position=position_dodge())+
@@ -2628,7 +2640,7 @@
         dev.off()
         
         
-        svg("Figure4C_AGR.svg")
+        svg("Figure5_AGR.svg")
         
         p <- ggplot (data=plot_data, aes(x=delay, y=angularGyrus_R, fill=emotion))+
           stat_summary(fun='mean',geom='bar', position=position_dodge())+
@@ -2650,7 +2662,7 @@
         
         dev.off()
         
-        svg("Figure4C_AGL.svg")
+        svg("Figure5_AGL.svg")
         
         p <- ggplot (data=plot_data, aes(x=delay, y=angularGyrus_R, fill=emotion))+
           stat_summary(fun='mean',geom='bar', position=position_dodge())+
@@ -2668,7 +2680,7 @@
         
         dev.off()
         
-        svg("Figure4C_vmPFC.svg")
+        svg("Figure5_vmPFC.svg")
         
         p <- ggplot (data=plot_data, aes(x=delay, y=vmPFC, fill=emotion))+
           stat_summary(stat = 'identity', fun='mean',geom='bar', position=position_dodge())+
@@ -2689,7 +2701,7 @@
         dev.off()
         
         
-        svg("Figure3C_IFG.svg")
+        svg("Figure5_IFG.svg")
         p <- ggplot (data=plot_data, aes(x=delay, y=IFG, fill=emotion))+
           stat_summary(stat = 'identity', fun='mean',geom='bar', position=position_dodge())+
           geom_point(pch = 19, position = position_dodge(0.6), 
@@ -2706,7 +2718,7 @@
         dev.off()
         
         
-        svg("Figure3C_aCC.svg")
+        svg("Figure5_aCC.svg")
         
         p <- ggplot (data=plot_data, aes(x=delay, y=aCC, fill=emotion))+
           stat_summary(stat = 'identity', fun='mean',geom='bar', position=position_dodge())+
@@ -2730,9 +2742,11 @@
                     pivot_longer(cols = c(vmPFC, aCC, IFG, Precuneus, angularGyrus_L, angularGyrus_R),
                                         names_to = "ROI",
                                   values_to = "fit") 
+        subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
         
-        addWorksheet(wb, "Figure3C_lowerPanel")
-        writeData(wb, "Figure3C_lowerPanel", subset_df)
+        
+        addWorksheet(wb, "Figure5_lowerPanel")
+        writeData(wb, "Figure5_lowerPanel", subset_df)
         
     # sensory control ROIs #####
       # occipital pole ####
@@ -2809,6 +2823,11 @@
                               (1 | Name) + (1 | set), 
                             data = longaxisL_ERSDf)
             summary(LMM_lHC)
+            
+            results.emmeans <- emmeans (LMM_lHC, pairwise ~ delay | longaxis, lmer.df = "satterthwaite", lmerTest.limit = 6240) #satterwhaite for fastening up computation, does not change results of contrasts
+            summary(results.emmeans, adjust="sidak") #adjustment if necessary
+
+            emmeans(pairwise) 
         
           # hits only
             hitsLongaxisL_ERSDf <- subset(mergedERSDf, hit == "1")
@@ -2817,9 +2836,9 @@
                               (1 | Name) + (1 | set), data = hitsLongaxisL_ERSDf)
             summary(LMM_lHC_hit)
           
-        # Figure 4 right upper panel #####
+        # Figure 6 right upper panel #####
           # anterior hippocampus 
-            svg("Figure4Upper_leftAnteriorHC.svg")
+            svg("Figure6Upper_leftAnteriorHC.svg")
             
             plot_data <- subset(longaxisL_ERSDf, longaxis == "anterior")%>%
                           aggregate(ERS ~ Name + delay + emotion, 
@@ -2847,7 +2866,7 @@
             dev.off()
           
           # posterior hippocampus
-            svg("Figure4Upper_leftPosteriorHC.svg")
+            svg("Figure6Upper_leftPosteriorHC.svg")
             
             plot_data <- subset(longaxisL_ERSDf, longaxis == "posterior")%>%
                           aggregate(ERS ~ Name + delay + emotion, 
@@ -2887,8 +2906,8 @@
           # Use the plyr package's mapvalues function to rename levels
           subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
             
-          addWorksheet(wb, "Figure4_upperPanel")
-          writeData(wb, "Figure4_upperPanel", subset_df)
+          addWorksheet(wb, "Figure6_upperPanel")
+          writeData(wb, "Figure6_upperPanel", subset_df)
           
       # association of remote posterior ERS with memory semantization #####
         # prepare data ####
@@ -2910,9 +2929,9 @@
                                                    optCtrl=list(maxfun=2e5))) 
           summary(glmm_perFA)
         
-        # Figure 4 lower right panel ####
+        # Figure 6 lower right panel ####
           # semantically related lures
-            svg("Figure4lower_semanticallyRelated.svg")
+            svg("Figure6lower_semanticallyRelated.svg")
             
             p <- plot_model(glmm_semFA, type = "eff", terms = c("ERS","delay"), 
                             show.data = FALSE, value.offset = TRUE, jitter = TRUE, 
@@ -2927,7 +2946,7 @@
             dev.off()
         
           # perceptually related lures
-            svg("Figure4lower_perceptuallyRelated.svg")
+            svg("Figure6lower_perceptuallyRelated.svg")
             
             p <- plot_model(glmm_perFA, type = "eff", terms = c("ERS","delay"), 
                             show.data = FALSE, value.offset = TRUE, jitter = TRUE, 
@@ -2946,8 +2965,8 @@
               dplyr::select(Name, emotion, delay, set, ERS, sem_FA) %>%
               dplyr::rename(posteriorHippocampal_ERS = ERS) 
 
-            addWorksheet(wb, "Figure4_lowerPanel")
-            writeData(wb, "Figure4_lowerPanel", subset_df)
+            addWorksheet(wb, "Figure6_lowerPanel")
+            writeData(wb, "Figure6_lowerPanel", subset_df)
             
         # additional analyses ####
           # hits
@@ -2986,7 +3005,7 @@
               my_theme
             
             dev.off()
-          # add to source data file ####
+         # add to source data file ####
             subset_df <- postHCERSDf %>%
               dplyr::select(Name, emotion, delay, set, ERS, detailed) %>%
               dplyr::rename(posteriorHippocampal_ERS = ERS) 
@@ -3294,12 +3313,12 @@
   # sociodemographics ####
   # before exclusion/ dropout
     describe(pilotDemoBeforeExclusionDf$age)
-    as.data.frame(table(pilotDemoBeforeExclusionDf$gender))
+    as.data.frame(table(pilotDemoBeforeExclusionDf$sex))
   
   # final sample
     pilotFinalDemoDf <- subset(pilotDemoBeforeExclusionDf, Name != 'pilot_62') ##drop participant who didn't finish task
     describe(pilotFinalDemoDf$age)
-    as.data.frame(table(pilotFinalDemoDf$gender))
+    as.data.frame(table(pilotFinalDemoDf$sex))
   
   # results for all pilot sets####
     # prepare data 
