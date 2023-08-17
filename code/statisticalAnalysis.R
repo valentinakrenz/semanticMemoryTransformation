@@ -1,53 +1,1189 @@
-### written by Valentina Krenz
-### analyses for the manuscript "Unraveling the semantic nature of memory transformation over time 
-### submitted 2022
+### Valentina Krenz 2023
+
+### analyses for the manuscript "Time-dependent memory transformation in hippocampus and neocortex is semantic in nature"
+### by Valentina Krenz, Arjen Alink, Tobias Sommer, Benno Roozendaal & Lars Schwabe
 
 # PACKAGES ####
-  #install.packages('readxl')
-  library(readxl) #importing data from excel
-  #install.packages("openxlsx")
-  library(openxlsx)
+# Tidyverse for data preparation
+library(tidyverse)
+
+# Importing data from Excel
+library(readxl)
+library(openxlsx)
+
+# For descriptive statistics
+library(psych)
+
+# For ANOVA
+library(afex)
+
+# Post-hoc tests for ANOVAs and (generalized) linear mixed models
+library(emmeans)
+
+# For Cohen's d
+library(lsr)
+
+# For lmer/glmer -> mixed effects model
+library(lme4)
+library(optimx)
+library(lmerTest) # show p_values in mixed effects model; masks lmer from lme4 and step from stats
+
+# Packages for plotting
+library(ggplot2) # For bar plots; masks %+%, alpha from psych
+library(showtext)# to add fonds
+
+# Necessary for SE within but masks rename (and other functions from dplyr)
+library(Rmisc)
+
+# For additional plotting features; masks mutate from plyr
+library(ggpubr)
+
+# Various other packages
+library(MuMIn)
+library(sjPlot) # plotting (generalized) linear mixed models; masks plot_grid and save_plot from cowplot
+library(flextable) # masks border, font, rotate from ggpubr
+
+options(scipen=999) # 999 if you don't want scientific notation for p-values
+
+# FUNCTIONS ####
+  sigma_res <- function(model=ANOVA) {
+    residuals <- resid(model)
+    sigma_value <- sd(residuals)
+    return(sigma_value)
+  }
   
-  #install.packages("tidyverse")
-  library(tidyverse) #prepare data #needs to be loaded after Rmisc
-  #install.packages('psych')
-  library(psych)#for descriptive statistics
+  # effect size for unpaired tests # will give you the same d ass emmeans::eff_size()
+  compute_effect_size <- function(emmeans=emmeans, model = ANOVA) {
+    stat  <- as.data.frame(summary(emmeans)$contrasts)
+    emmeans <- as.data.frame(summary(emmeans))
+    
+    # Determine the position of the "contrast" and "estimate" columns
+    contrast_pos <- which(colnames(stat) == "contrast")
+    estimate_pos <- which(colnames(stat) == "estimate")
+    
+    # Get any additional factor columns between "contrast" and "estimate"
+    additional_factors <- colnames(stat)[(contrast_pos + 1):(estimate_pos - 1)]
+    
+    # Create unique identifiers based on "contrast" and any additional factors
+    unique_identifiers <- apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ")
+    unique_identifiers <- unique(unique_identifiers)
+    
+    # Create a data frame to store the results
+    result_df <- data.frame(
+      contrast = character(),
+      t = numeric(),
+      df = numeric(),
+      d = numeric(),
+      lower_CI = numeric(),
+      upper_CI = numeric(),
+      p = numeric(),
+      stringsAsFactors = FALSE
+    )
+    
+    # Iterate over the unique combinations of "contrast" and any additional factors
+    for (id in unique_identifiers) {
+      i <- which(apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ") == id)[1]
+      
+      # Extract mean difference and standard error
+      mean_difference <- stat$estimate[i]
+      SE <- stat$SE[i]
+      
+      # Compute Cohen's d
+      cohens_d <- mean_difference / sigma_res(model = ANOVA)
+      
+      # Compute the confidence intervals
+      lower.CL <- cohens_d - 1.96 * SE / sigma_res(model = ANOVA) 
+      upper.CL <- cohens_d + 1.96 * SE / sigma_res(model = ANOVA)
+      
+      # Get the contrast value, including any additional factors
+      contrast_value <- paste(stat$contrast[i], sapply(additional_factors, function(x) paste("in", stat[[x]][i])))
+      contrast_value <- paste(contrast_value, collapse = " ")
+      
+      # Add the results to the overall results data frame
+      result_df <- rbind(result_df, data.frame(
+        contrast = contrast_value,
+        t = stat$t.ratio[i],
+        df = stat$df[i],
+        d = cohens_d,
+        lower_CI = lower.CL,
+        upper_CI = upper.CL,
+        p = stat$p.value[i],
+        stringsAsFactors = FALSE
+      ))
+    }
+    
+    return(result_df)
+  }
   
-  #install.packages('afex')
-  library(afex)#ANOVA
-  #install.packages('emmeans')
+  # effect size for interaction contrasts # includes adjustment of sigma
+  compute_effect_size_interaction <- function(emmeans=emmeans, stat=stat, model=ANOVA, title=title) {
+    stat  <- as.data.frame(stat)
+    emmeans <- as.data.frame(summary(emmeans))
+    
+    # Get unique contrasts
+    unique_contrasts <- unique(stat$contrast)
+    print("Unique Contrasts:")
+    print(unique_contrasts)
+    
+    # Create a data frame to store the results
+    new_df <- data.frame(
+      contrast = character(),
+      t = numeric(),
+      df = numeric(),
+      d = numeric(),
+      lower_CI = numeric(),
+      upper_CI = numeric(),
+      p = numeric(),
+      stringsAsFactors = FALSE
+    )
+    
+    # Iterate over the unique contrast levels
+    for (contrast in unique_contrasts) {
+      print(paste("Processing Contrast:", contrast))
+      # Filter data for the specific contrast
+      contrast_stat <- stat[stat$contrast == contrast,]
+      print("Contrast Statistics:")
+      print(contrast_stat)
+      
+      # Extract mean difference and standard error (take the first row, as they are all the same)
+      mean_difference <- contrast_stat$estimate[1]
+      SE <- contrast_stat$SE[1]
+      print("Mean Difference and Standard Error:")
+      print(c(mean_difference, SE))
+      
+      # Compute Cohen's d
+      cohens_d <- mean_difference / (sigma_res(model = model) * sqrt(2))
+      print("Cohen's d:")
+      print(cohens_d)
+      
+      # Compute the confidence intervals
+      lower.CL <- cohens_d - 1.96 * SE / (sigma_res(model = model) * sqrt(2))
+      upper.CL <- cohens_d + 1.96 * SE / (sigma_res(model = model) * sqrt(2))
+      print("Confidence Intervals:")
+      print(c(lower.CL, upper.CL))
+      
+      # Add the results to the overall results data frame
+      new_df <- rbind(new_df, data.frame(
+        contrast = contrast,
+        t = contrast_stat$t.ratio[1],
+        df = contrast_stat$df[1],
+        d = cohens_d,
+        lower_CI = lower.CL,
+        upper_CI = upper.CL,
+        p = contrast_stat$p.value[1],
+        stringsAsFactors = FALSE))
+        print("New Data Frame:")
+        print(new_df)
+    }
+    print("Full Data Frame:")
+    print(new_df)
+    return(new_df)
+  }
+
+  # computes sigma based on difference between conditions
+  compute_effect_size_paired <- function(emmeans = emmeans, data, group_variable = NULL, 
+                                         within_variable, response_variable) {
+    
+    means <- as.data.frame(summary(emmeans$emmeans))
+    stat  <- as.data.frame(summary(emmeans)$contrasts)
+    
+    result_df <- data.frame(
+      contrast = character(),
+      t = numeric(),
+      df = numeric(),
+      d = numeric(),
+      lower_CI = numeric(),
+      upper_CI = numeric(),
+      p = numeric(),
+      stringsAsFactors = FALSE
+    )
+    
+    # Determine if there are group variables and their levels
+    if (is.null(group_variable)) {
+      combinations <- data.frame(unique(stat$contrast))
+      group_case <- 0
+    } else if (length(group_variable) == 1) {
+      group_variable1 <- group_variable[1]
+      group_levels1 <- unique(means[[group_variable[1]]])
+      combinations <- expand.grid(contrast = unique(stat$contrast), level1 = group_levels1)
+      group_case <- 1
+    } else if (length(group_variable) == 2) {
+      group_variable1 <- group_variable[1]
+      group_variable2 <- group_variable[2]
+      group_levels1 <- unique(means[[group_variable[1]]])
+      group_levels2 <- unique(means[[group_variable[2]]])
+      combinations <- expand.grid(contrast = unique(stat$contrast), level1 = group_levels1, level2 = group_levels2)
+      group_case <- 2
+    }
+   
+    # Loop through the combinations
+    for (comb_i in 1:nrow(combinations)) {
+      combination <- combinations[comb_i,]
+      
+      print(paste("Processing combination:", paste(combination, collapse = ", ")))
+      
+      # Case with no group variables
+      if (group_case == 0) {
+        subset_data <- data
+        contrast <- combination
+        
+        # Case with one group variable
+      } else if (group_case == 1) {
+        subset_data <- subset(data, data[[group_variable[1]]] == combination$level1)
+        contrast <- combination$contrast
+        
+        # Case with two group variables
+      } else if (group_case == 2) {
+        print(paste("Subsetting by contrast == ", combination$contrast, "and", group_variable1, "==", combination$level1, "and", group_variable2, "==", combination$level2))
+        subset_data <- subset(data, data[[group_variable[1]]] == combination$level1 & data[[group_variable[2]]] == combination$level2)
+        contrast <- combination$contrast
+      }
+      
+      contrast <- as.character(contrast)
+      within_values <- unlist(strsplit(contrast, ' - '))
+      
+      #within_values1 <- subset_data[subset_data[[within_variable]] == within_values[1], response_variable]
+      #within_values2 <- subset_data[subset_data[[within_variable]] == within_values[2], response_variable]
+      
+      within_values1 <- subset_data[subset_data[[within_variable]] == within_values[1], response_variable]
+      within_values2 <- subset_data[subset_data[[within_variable]] == within_values[2], response_variable]
+      
+      differences <- within_values1 - within_values2
+      sigma_difference <- sd(differences)
+      
+      # Determine the correct row based on the group_case
+      if (group_case == 0) {
+        correct_row <- stat[grepl(contrast, stat$contrast), ]
+      } else if (group_case == 1) {
+        correct_row <- subset(stat, contrast == combination$contrast & stat[[group_variable1]] == combination$level1)
+      } else if (group_case == 2) {
+        correct_row <- subset(stat, contrast == combination$contrast & stat[[group_variable1]] == combination$level1
+                              & stat[[group_variable2]] == combination$level2)
+      }
+      print(correct_row)
+      mean_difference <- correct_row$estimate
+      SE <- correct_row$'SE'
+      
+      cohens_d <- mean_difference / sigma_difference
+      lower.CL <- cohens_d - 1.96 * SE / sigma_difference
+      upper.CL <- cohens_d + 1.96 * SE / sigma_difference
+      
+      print(cohens_d)
+      print(lower.CL)
+      print(upper.CL)
+      
+      # Initialize group_label as an empty string
+      group_label <- ""
+      
+      # Check if 'level1' exists in 'combination' and add it to the label if it does
+      if (group_case == 1 || group_case == 2) {
+        if (!is.null(combination$level1)) {
+          group_label <- paste("in", combination$level1)
+        }
+      }
+      
+      # Check if 'level2' exists in 'combination' and add it to the label if it does
+      if (group_case == 2) {
+        if (!is.null(combination$level2)) {
+          group_label <- paste(group_label, "and", combination$level2)
+        }
+      }
+
+      group_df <- data.frame(
+        contrast = paste(contrast, group_label),
+        t = correct_row$t.ratio,
+        df = correct_row$df,
+        d = cohens_d,
+        lower_CI = lower.CL,
+        upper_CI = upper.CL,
+        p = correct_row$p.value,
+        stringsAsFactors = FALSE
+      )
+      
+      result_df <- rbind(result_df, group_df)
+    }
+
+    return(result_df)
+  }
   
-  library(emmeans) #post-hoc tests for ANOVAs and  (generalized) linear mixed models
-  #install.packages('lsr')
-  library(lsr) #for cohensDlibrary(sjPlot) #plots for (g)lmer
+  # Apply rounding rounding specifically for the p-value column
+  round_p <- function(table_df, p_col = ncol(table_df)) {
+    table_df[, p_col] <- sapply(table_df[, p_col], function(x) {
+      if (x >= 0.0005) {
+        result <- round(x, 3)
+      } else if (x >= 0.00005) {
+        result <- round(x, 4)
+      } else if (x < 9e-99) {
+        result <- "< 9e-99"
+      } else {
+        result <- result <- format(x, digits = 1, scientific = TRUE) # Use scientific notation
+      }
+      result
+    })
+    return(table_df)
+  }
   
-  ##multilevel packages
-  #install.packages('lme4')
-  library(lme4) #fÃ¼r lmer / glmer -> mixed effects model
-  #install.packages('optimx')
-  library(optimx)
-  #install.packages('lmerTest')
-  library(lmerTest) #show p_values in mixed effetcs model
+  # round 2 spaces
+  round_two_spaces <- function(table_df=table_df, start_col = 2, end_col = ncol(table_df)-1){
+    for (j in start_col:end_col) { # Exclude the variable, d, and p-value columns
+      table_df[, j] <- sapply(table_df[, j], function(x) {
+        if (!is.nan(x)) { # Check if the value is not NaN
+          abs_x <- abs(x)
+          if (abs_x >= 0.005) {
+            result <- round(x, 2)
+          } else if (abs_x >= 0.0005) {
+            result <- round(x, 3)
+          } else if (abs_x == 0) {
+            result <- "0.00"
+          } else if (abs_x < 0.0005) {
+            result <- result <- format(x, digits = 1, scientific = TRUE) # Use scientific notation
+          }
+        } else { # If the value is NaN, retain it as is
+          result <- x
+        }
+        result # return the result for each element inside the sapply function
+      })
+    }
+    return(table_df) # return the entire data frame outside the loop
+  }
   
-  #packages for plotting
-  #install.packages('ggplot2')
-  library(ggplot2) #for bar plots
+  # get ci for partial eta squared # from etaSquaredCI.R
+  # this function is required by the following function
+  get_partial_eta2_from_lambda <- function(lambda, df1, df2)  {
+    partial_eta2 <- lambda / (lambda + df1 + df2 + 1)
+    return(partial_eta2)
+  }
+  # computes ci for partial eta squared # from etaSquaredCI.R
+  get.ci.partial.eta.squared <- function(F.value, df1, df2, conf.level=.95) {
+    F_value <- F.value
+    
+    conf_level <- conf.level
+    
+    LL_partial_eta2 <- NA
+    UL_partial_eta2 <- NA
+    
+    if (requireNamespace("MBESS", quietly = TRUE)) {
+      F_limits <- MBESS::conf.limits.ncf(F=F_value, df.1=df1, df.2=df2, conf.level=conf_level)
+      LL_lambda <- F_limits$Lower.Limit
+      UL_lambda <- F_limits$Upper.Limit
+      
+      
+      LL_partial_eta2 <- get_partial_eta2_from_lambda(lambda=LL_lambda, df1=df1, df2=df2)
+      UL_partial_eta2 <- get_partial_eta2_from_lambda(lambda=UL_lambda, df1=df1, df2=df2)
+      
+      
+      if (is.na(LL_partial_eta2)) {
+        LL_partial_eta2 <- 0
+      }
+      
+      if (is.na(UL_partial_eta2)) {
+        UL_partial_eta2 <- 1
+      }
+    } else {
+      cat("\nMBESS package needs to be installed to calculate eta-squared confidence intervals.\n")
+    }
+    
+    output <- list()
+    output$LL <- LL_partial_eta2
+    output$UL <- UL_partial_eta2
+    return(output)
+  }
   
-  #install.packages('Rmisc')
-  library(Rmisc) #necessary for SE within but masks rename (and other functions from dplyr)
-  #install.packages('ggpubr')
-  library(ggpubr)
-  #install.packages('sjPlot')
-  library(sjPlot)#plotting (generalized) linear mixed models #maskes plot_grid and save_plot from cowplot
-  library(showtext)
-  library("curl")
+  # bring ANOVA results to a nice table and get ci
+  get_ANOVA_results <- function(ANOVA=ANOVA) {
+    # get results in correct format 
+    anova_table <- ANOVA$anova_table
+    table_df <- as.data.frame(ANOVA$anova_table)
+    variable_names <- ANOVA$Anova$terms[-1]
+    table_df <- cbind(Variable = variable_names, table_df)
+    rownames(table_df) <- NULL
+    # Initialize new columns to store the lower and upper limits of the confidence intervals
+    table_df$LL_CI <- NA
+    table_df$UL_CI <- NA
+    
+    # Loop through each variable and compute the 95% confidence interval
+    for (i in 1:nrow(table_df)) {
+      ci <- get.ci.partial.eta.squared(
+        F.value = table_df$F[i],
+        df1 = table_df$"num Df"[i],
+        df2 = table_df$"den Df"[i],
+        conf.level = 0.95
+      )
+      table_df$LL_CI[i] <- ci$LL
+      table_df$UL_CI[i] <- ci$UL
+    }
+    
+    # Reorganize columns
+    table_df <- table_df[, c("Variable", "num Df", "den Df", "F", "LL_CI", "UL_CI", "pes", "Pr(>F)")]
+    
+    # Assuming these functions are already defined in your script
+    table_df <- round_p(table_df = table_df)
+    table_df <- round_two_spaces(table_df = table_df, start_col = 2)
+    
+    # add multiplication sign to interaction variable
+    table_df$Variable <- gsub(":", " × ", table_df$Variable)
+    # Concatenate the values from the "num Df" and "den Df" columns into the "F" column
+    table_df$F <- paste(table_df$F, " (", table_df$`num Df`, ", ", table_df$`den Df`, ")", sep = "")
+    # Concatenate the LL_CI and UL_CI columns to create the "95% CI" column
+    table_df$`95% CI` <- paste("[", table_df$LL_CI, ", ", table_df$UL_CI, "]", sep = "")
+    # Remove the "num Df" and "den Df" columns as they're now part of the "F" column
+    table_df <- table_df[, -c(2, 3)]
+    # Select the columns you want to keep and reorder them
+    table_df <- table_df[, c("Variable","F", "Pr(>F)","pes", "95% CI")]
+    # Update column names if necessary
+    colnames(table_df) <- c("variable","F", "p","pes", "95% CI")
+    
+    return(table_df)
+  }
   
-  options(scipen=999) #don't use scientific notation for p-values
+  # save in text file
+  save_ANOVA_text <- function(table_df=table_df, title, file_name = "output", show_file = TRUE) {
+    # Add the .txt extension to the file name
+    file_name <- paste0(file_name, ".txt")
+    # Open the file for appending
+    file_conn <- file(file_name, "a")
+    # Write the header
+    cat("\n", title, "\n", file = file_conn)
+    
+    # Iterate over the rows of table_df
+    for (i in 1:nrow(table_df)) {
+      # Extract the relevant elements
+      variable <- table_df$variable[i]
+      
+      # Add "main effect" prefix if there is no multiplication sign in the variable name
+      if (grepl("×", variable) == FALSE) {
+        variable <- paste("main effect", variable)
+      }
+      
+      F_values <- gsub(" ", "", sub(".*\\(", "", sub("\\).*", "", table_df$F[i]))) # Extract the df entries inside brackets
+      F_stat <- sub(" \\(.*", "", table_df$F[i]) # Extract the F value outside brackets
+      
+      # Construct the formatted string
+      formatted_string <- paste(variable, ": F (", F_values, ") = ", F_stat, ", p = ", 
+                                table_df$p[i], ", pes = ", table_df$pes[i], ", ",
+                                "95% Confidence Interval: ", table_df$'95% CI'[i], sep = "")
+      
+      # Write the formatted string to the file
+      cat(formatted_string, "\n", file = file_conn)
+    }
+    
+    # Close the file connection
+    close(file_conn)
+    
+    # Open the text file with the system's default text editor if show_file is TRUE
+    if (show_file) {
+      file.show(file_name)
+    }
+  }
+  
+  # save post hoc t-test statistic in text file
+  save_postHoc_t_text <- function(table_df, start_col = 2, header_row, file_name = "output", show_file = TRUE, round = TRUE) {
+
+    # Add the .txt extension to the file name
+    file_name <- paste0(file_name, ".txt")
+    # Open the file for appending
+    file_conn <- file(file_name, "a")
+    # Write the header
+    cat("\n\n", header_row, "\n", file = file_conn)
+    
+    prev_title <- NULL
+    
+    if (round){
+    # Round the data as specified
+    table_df <- round_two_spaces(table_df, start_col = start_col, end_col = ncol(table_df)-1)
+    table_df <- round_p(table_df=table_df, p_col=ncol(table_df))
+    }
+    
+    # Iterate through the rows of the data frame
+    for (i in 1:nrow(table_df)) {
+      title <- table_df$title[i]
+      contrast <- table_df$contrast[i]
+      t_val <- table_df$t[i]
+      df_val <- table_df$df[i]
+      p_val <- table_df$p[i]
+      d_val <- table_df$d[i]
+      lower_CI <- table_df$lower_CI[i]
+      upper_CI <- table_df$upper_CI[i]
+      
+      # If the title has changed since the previous row, print the title
+      if (!is.null(prev_title) && prev_title != title) {
+        cat("\n", file = file_conn) # Add a space between each type of title
+      }
+      if (is.null(prev_title) || prev_title != title) {
+        cat("Title:", title, "\n\n", file = file_conn) # Print the title
+      }
+      
+      # Construct the strings
+      title_string <- paste("Contrast:", contrast, "\n")
+      t_string <- paste("t(", df_val, ") = ", t_val, ", ", sep = "")
+      p_string <- paste("p = ", p_val, ", ", sep = "")
+      d_string <- paste("d = ", d_val, ", ", sep = "")
+      CI_string <- paste("95% Confidence Interval = [", lower_CI, ", ", upper_CI, "]\n", sep = "")
+      
+      # Concatenate the strings and print to the file
+      result_string <- paste(title_string, t_string, p_string, d_string, CI_string)
+      cat(result_string, file = file_conn)
+      
+      # Update the previous title variable
+      prev_title <- title
+    }
+    
+    # Close the file connection
+    close(file_conn)
+    
+    # Open the text file with the system's default text editor if show_file is TRUE
+    if (show_file) {
+      file.show(file_name)
+    }
+  }
+  
+  # bring manually computed t-tests and effect sized into table 
+  get_manual_contrasts <- function(ttest=ttest, eff=eff, title=title) {
+    
+    t <- ttest$statistic
+    df <- ttest$parameter
+    p <- ttest$p.value
+    cohen_d <- as.data.frame(eff$cohen.d)
+    lower_CI <- cohen_d["lower"]
+    upper_CI <- cohen_d["upper"]
+    effect_size <- cohen_d["effect"]
+    
+    # Creating the dataframe
+    result_df <- data.frame(
+      contrast = title,
+      t = t,
+      df = df,
+      d = effect_size[1,],
+      lower_CI = lower_CI[1,],
+      upper_CI = upper_CI[1,],
+      p = p
+    )
+    result_df <- round_two_spaces(table_df = result_df, start_col = 2, end_col = ncol(result_df)-1)
+    result_df <- round_p(table_df = result_df)
+    # Printing the results
+    return(result_df)
+  }
+  
+  get_gLMM_results <- function(gLMM = gLMM, title){
+    
+    summary <- summary(gLMM)
+    model_header <- paste0("parameters for generalized linear mixed model")
+    
+    conf = confint(gLMM, method="Wald")
+    # Find the row index for '(Intercept)'
+    intercept_row <- which(rownames(conf) == "(Intercept)")
+    # Keep only the rows from '(Intercept)' on
+    conf <- conf[(intercept_row):nrow(conf), ]
+    #rename conf cols
+    colnames(conf) <- c("lower_CI", "upper_CI")
+    
+    # Extract coefficients
+    coefficients <- summary$coefficients
+    
+    # Combine the two into a new data frame
+    coefficients <- cbind(coefficients, conf)
+    
+    # Create a data frame
+    fixed <- data.frame(
+      predictor = rownames(coefficients), beta = coefficients[, "Estimate"],
+      z = coefficients[, "z value"], lower_CI = coefficients[, "lower_CI"], upper_CI = coefficients[, "upper_CI"],
+      p = coefficients[, "Pr(>|z|)"]
+    )
+    
+    # Compute standard errorsstd_error <- coefficients[, "Std. Error"]
+    fixed$predictor <- gsub("\\(Intercept\\)", "intercept", fixed$predictor)
+    fixed$predictor <- gsub("delay28d", "delay", fixed$predictor)
+    fixed$predictor <- gsub("emotionnegative", "emotion", fixed$predictor)
+    fixed$predictor <- gsub("percRatingGroupMeanCent", "perceptual rel.", fixed$predictor)
+    fixed$predictor <- gsub("semRatingGroupMeanCent", "semantic rel.", fixed$predictor)
+    fixed$predictor <- gsub(":", " × ", fixed$predictor)
+    
+    fixed <- round_two_spaces(table_df = fixed, start_col = 2, end_col = ncol(fixed)-1)
+    fixed <- round_p(table_df = fixed)
+    
+    fixed$`95% CI` <- paste(fixed$lower_CI, ", ", fixed$upper_CI, sep = "")
+    
+    fixed <- as.data.frame(fixed[, c("predictor", "z", "p", "beta",  "95% CI")])
+    rownames(fixed) <- NULL
+    # Extract the standard deviations of the random effects
+    random <- as.data.frame(VarCorr(gLMM))
+    # Delete var2
+    random$var2 <- NULL
+    ngrps <- as.data.frame(summary[["ngrps"]])
+    colnames(ngrps) <- "n"
+    random$n <- ngrps[,1]
+    # Rename values in the grp_var1 column
+    random$grp <- gsub("stimulusTypeNum", "stimulus (intercept)", random$grp)
+    random$grp <- gsub("set", "stimulus set (intercept)", random$grp)
+    random$grp <- gsub("Name", "participant (intercept)", random$grp)
+    # Find the row index where the 'grp' column has the value "participant"
+    participant_row <- which(random$grp == "participant (intercept)")
+    # Rearrange the rows so that the participant row comes first
+    random <- rbind(random[participant_row, ], random[-participant_row, ])
+    # Rename columns vcov and sdcor
+    names(random)[names(random) == "vcov"] <- "variance"
+    names(random)[names(random) == "sdcor"] <- "SD"
+    # Select the desired columns in the final data frame
+    random <- as.data.frame(random[, c("grp", "variance", "SD","n")])
+    random = round_two_spaces(table_df = random, start_col = 2, end_col=ncol(random)-1)
+    colnames(random)[1] <- "random effects"
+    
+    # Calculate R-squared values
+    r2_values <- r.squaredGLMM(gLMM)
+    # Create a data frame with the results
+    r2 <- data.frame(
+      marginal = r2_values["theoretical", "R2m"],
+      conditional = r2_values["theoretical", "R2c"],
+      row.names = "R2"
+    )
+    
+    r2 <- as.data.frame(round_two_spaces(table_df = r2, start_col = 1, end_col = ncol(r2)))
+    # Add a new column with the name "R2" and NA as its value
+    r2 <- data.frame(R2 = NA, r2)
+    # write string for note
+    r2_note <- paste0("marginal R² / conditional R²: ", paste(r2$marginal, "/", r2$conditional))
+    
+    # Define the number of rows for each section
+    n_fixed_rows <- nrow(fixed) + 1 # 2 extra for the title and header row
+    n_random_rows <- nrow(random) + 1
+    
+    # Create an empty dataframe with the total number of rows and columns equal to the largest dataframe
+    combined_df <- data.frame(matrix(ncol = ncol(fixed), nrow = n_fixed_rows + n_random_rows + 1)) # 3 extra lines for empty line, aic/bic, r2 
+    # Add "Fixed Effects" title in the first column
+    combined_df[1, 1] <- "fixed effects"
+    # Add fixed data
+    combined_df[1, 2:ncol(fixed)] <- colnames(fixed)[2:ncol(fixed)]
+    combined_df[1, 4] <- "\u03B2" # unicode for lower case beta
+    combined_df[2:(n_fixed_rows), ] <- as.data.frame(fixed)
+
+    combined_df[n_fixed_rows + 1, 1:ncol(random)] <- colnames(random)
+    combined_df[(n_fixed_rows + 2):(n_fixed_rows + n_random_rows), 1:ncol(random)] <- as.data.frame(random)
+    
+    combined_df <- as.data.frame(combined_df)
+    # Create a new row with the desired header
+    header_row_df <- data.frame(matrix(ncol = ncol(combined_df), nrow = 1))
+    header_row_df[1, 1] <- model_header
+    # Combine the header row with the existing data frame
+    combined_df <- bind_rows(header_row_df, combined_df)
+    combined_df[nrow(combined_df),1] = r2_note
+    
+    result <- combined_df
+    
+return(result)
+  }   
+  
+  create_gLMM_table <- function(result = result, file_name, save = TRUE, show = TRUE) {
+    
+    table_df <- result
+    table_df <- table_df[-1,]
+    model_header <- "parameters for generalized linear mixed model"
+    
+    # find rows of fixed and random effetc title
+    row_predictor <- which(table_df$X1 == "fixed effects")
+    row_random_effects <- which(table_df$X1 == "random effects")
+    # Calculating the number of rows between the two rows
+    number_predictors <- row_random_effects - row_predictor - 1 
+    number_predictors
+    # Counting the number of rows after the "random effects" row
+    number_random_effects <- nrow(table_df) - row_random_effects  # 3 extra lines
+    number_random_effects
+    
+    ft <- flextable(table_df) %>%
+      delete_part(part = "header") %>%
+      add_header_lines(model_header) %>%
+      align(align = "center", part = "header") %>%
+      align(align = "center", part = "all", j = 2:ncol(table_df)) %>%
+      hline(i=row_predictor, j=2:ncol(table_df), fp_border_default(color="black",width=1)) %>%
+      hline(i=row_random_effects, j=2:(ncol(table_df)-1), fp_border_default(color="black",width=1)) %>%
+      hline_top(j=1:ncol(table_df), border = fp_border_default
+                (color="black",width=1), part = "header") %>%
+      hline_top(j=1:ncol(table_df), border = fp_border_default
+                (color="black",width=1)) %>%
+      hline_bottom(j=1:ncol(table_df), border = 
+                     fp_border_default(color="black",width=1)) %>%
+      align(align = "center", part = "all", j = 2:ncol(table_df)) %>%
+      bold(i=c(row_predictor,row_random_effects), j=1) %>%
+      bold(part = "header") %>%
+      italic(i=1, j=c(2,3,4)) %>%
+      italic(i=row_random_effects, j=4) %>%
+      padding(i=c((row_predictor+1):(number_predictors+1)), j=1, padding.left=20) %>%
+      padding(i=c((row_random_effects+1):(row_random_effects + number_random_effects-1)), j=1, padding.left=20) %>%
+      line_spacing(space = 0.5, part = "body") %>%
+      merge_at(i=nrow(table_df), j=1:ncol(table_df))%>%
+      add_footer_lines(as_paragraph("Source data are provided as Source Data file.")) %>%
+      padding(i=c(row_predictor, row_random_effects), padding.bottom=2) %>%
+      fontsize(size=10, part="all") %>%
+      autofit()
+    ft
+    
+    if(save){
+      table_path <- paste0(file_path, '/result_tables')
+      
+      if (!dir.exists(table_path)) {
+        dir.create(table_path)
+        cat("Directory created:", table_path, "\n")
+      } else {
+        cat("Directory already exists:", table_path, "\n")
+      }
+      
+      full_file_path <- normalizePath(paste0(table_path,"/",file_name, ".docx"))
+      save_as_docx(ft, path = full_file_path)
+      
+      # Conditionally open the created file
+      if (show) {
+        shell.exec(full_file_path)
+      }
+    }
+    return(ft)
+    
+  }
+  
+  # save gLMM report to text file
+  save_gLMM_text <- function(table_df=table_df, file_name = "output", title=header_row, show_file = TRUE) {
+    # Add the .txt extension to the file name
+    file_name <- paste0(file_name, ".txt")
+    # Open the file for appending
+    file_conn <- file(file_name, "a")
+    # Write the header
+    #title <- table_df[1, 1]
+    title=header_row
+    cat("\n", title, "\n", file = file_conn)
+    
+    table_df=table_df[2:6,]
+    colnames(table_df)=NULL
+    # Set the column names to the values in the first row
+    colnames(table_df) <- as.character(table_df[1, ])
+    # Remove the first row
+    table_df <- table_df[-1, ]
+    
+    # Iterate over the rows of table_df
+    for (i in 2:nrow(table_df)) {
+      # Extract the relevant elements
+      variable <- table_df$`fixed effects`[i]
+      
+      # Add "main effect" prefix if there is no multiplication sign in the variable name and it's not the intercept
+      if (grepl("×", variable) == FALSE) {
+        variable <- paste("main effect", variable)
+      }
+      
+      # Construct the formatted string
+      formatted_string <- paste0(variable, ": z = ", table_df$z[i],", p = ", 
+                                table_df$p[i], ", β = ", table_df$'β'[i],
+                                ", 95% Confidence Interval: [", table_df$'95% CI'[i],"]")
+      
+      # Write the formatted string to the file
+      cat(formatted_string, "\n", file = file_conn)
+    }
+    
+    # Close the file connection
+    close(file_conn)
+    
+    # Open the text file with the system's default text editor if show_file is TRUE
+    if (show_file) {
+      file.show(file_name)
+    }
+  }
+  
+  # order results of z-test into table and compute d and ci
+  get_z_results <- function(emmeans=emmeans, gLMM=gLMM, title=title, edf=Inf) {
+    stat <- as.data.frame(emmeans$contrasts)
+    eff <- eff_size(emmeans, sigma = sigma(gLMM), edf = edf)
+    eff_df <- as.data.frame(eff)
+    
+    # Determine the position of the "contrast" and "estimate" columns
+    contrast_pos <- which(colnames(stat) == "contrast")
+    estimate_pos <- which(colnames(stat) == "estimate")
+    
+    # Get any additional factor columns between "contrast" and "estimate"
+    additional_factors <- colnames(stat)[(contrast_pos + 1):(estimate_pos - 1)]
+    # Create unique identifiers based on "contrast" and any additional factors
+    unique_identifiers <- apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ")
+    unique_identifiers <- unique(unique_identifiers)
+    
+    # Extract relevant information from the 'stat' and 'eff_df' data frames
+    result_df <- data.frame(
+      title=character(),
+      contrast = character(),
+      z = numeric(),
+      d = numeric(),
+      lower_CI = numeric(),
+      upper_CI = numeric(),
+      p = numeric()
+    )
+    
+    for (unique_identifier in unique_identifiers) {
+      
+      # Create a logical index for rows that match the unique_identifier
+      row_index <- apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ") == unique_identifier
+      
+      # Subset stat and eff_df based on the row_index
+      subset_stat <- stat[row_index,]
+      subset_eff_df <- eff_df[row_index,]
+      
+
+    # Extract relevant information from the 'stat' and 'eff_df' data frames
+    new_df <- data.frame(
+      contrast = unique_identifier,
+      z = subset_stat$z.ratio,
+      d = subset_eff_df$effect.size,
+      lower_CI = subset_eff_df$asymp.LCL,
+      upper_CI = subset_eff_df$asymp.UCL,
+      p = subset_stat$p.value
+    )
+    
+    new_df <- round_two_spaces(table_df=new_df)
+    new_df <- round_p(table_df = new_df, p_col = ncol(new_df))
+    # Bind the title column to the beginning of new_df
+    title_column <-data.frame(title = rep(title, nrow(new_df)))
+    new_df <- cbind(title_column, new_df)
+    
+    result_df = rbind(result_df, new_df)
+    }
+    
+    return(result_df)
+  }
+  
+  # save z test report in text file
+  save_z_text <- function(table_df=table_df,file_name = "output", show_file = TRUE) {
+    # Add the .txt extension to the file name
+    file_name <- paste0(file_name, ".txt")
+    # Open the file for appending
+    file_conn <- file(file_name, "a")
+    # Write the header
+    title <- table_df[i, 1]
+    cat("\n post hoc z-test \n", file = file_conn)
+    #table_df=table_df[2:6,]
+    #colnames(table_df)=NULL
+    # Remove the first row
+    #table_df <- table_df[-1, ]
+    i=1
+    # Iterate over the rows of table_df
+    for (i in 1:nrow(table_df)) {
+      # Extract the relevant elements
+      title <- table_df[i, 1]
+      cat("\n", title, "\n", file = file_conn)
+      
+      variable <- table_df$contrast[i]
+      
+      # Construct the formatted string
+      formatted_string <- paste(variable, ": z = ", table_df$z[i],", p = ", 
+                                table_df$p[i], ", d = ", table_df$d[i],
+                                ", 95% Confidence Interval: [", table_df$lower_CI[i], ", ", table_df$upper_CI[i], "]", sep = "")
+      
+      # Write the formatted string to the file
+      cat(formatted_string, "\n", file = file_conn)
+    }
+    
+    # Close the file connection
+    close(file_conn)
+    
+    # Open the text file with the system's default text editor if show_file is TRUE
+    if (show_file) {
+      file.show(file_name)
+    }
+  }
+  
+  # effect size for unpaired tests # will give you the same d as emmeans::eff_size()
+  compute_effect_size_z_interaction <- function(stat=stat, model = gLMM, title=title) {
+    stat = as.data.frame(stat)
+
+    # Determine the position of the "contrast" and "estimate" columns
+    contrast_pos <- which(colnames(stat) == "contrast")
+    estimate_pos <- which(colnames(stat) == "estimate")
+    
+    # Check if there are any additional factor columns between "contrast" and "estimate"
+    if (contrast_pos + 1 == estimate_pos || contrast_pos == estimate_pos - 1) {
+      unique_identifiers <- stat$contrast
+    } else {
+      # Get any additional factor columns between "contrast" and "estimate"
+      additional_factors <- colnames(stat)[(contrast_pos + 1):(estimate_pos - 1)]
+      # Create unique identifiers based on "contrast" and any additional factors
+      unique_identifiers <- apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ")
+      unique_identifiers <- unique(unique_identifiers)
+    }
+    
+    
+    # Create a data frame to store the results
+    result_df <- data.frame(
+      title = character(),
+      contrast = character(),
+      z = numeric(),
+      d = numeric(),
+      lower_CI = numeric(),
+      upper_CI = numeric(),
+      p = numeric(),
+      stringsAsFactors = FALSE
+    )
+    
+   # Iterate over the unique combinations of "contrast" and any additional factors
+      for (id in unique_identifiers) {
+        if (contrast_pos + 1 == estimate_pos || contrast_pos == estimate_pos - 1) {
+          i <- which(stat$contrast == id)[1]
+          contrast_value = stat$contrast[i]
+        } else {
+          i <- which(apply(stat[, c("contrast", additional_factors)], 1, paste, collapse = " ") == id)[1]
+          # Get the contrast value, including any additional factors
+          contrast_value <- paste(stat$contrast[i], sapply(additional_factors, function(x) paste("in", stat[[x]][i])))
+          contrast_value <- paste(contrast_value, collapse = " ")
+        }
+
+      # Extract mean difference and standard error
+      mean_difference <- stat$estimate[i]
+      SE <- stat$SE[i]
+      
+      # Compute Cohen's d
+      cohens_d <- mean_difference / sigma(gLMM)
+      
+      # Compute the confidence intervals
+      lower.CL <- cohens_d - 1.96 * SE / sigma(gLMM) 
+      upper.CL <- cohens_d + 1.96 * SE / sigma(gLMM)
+
+      
+      # Add the results to the overall results data frame
+      result_df <- rbind(result_df, data.frame(
+        title = title,
+        contrast = contrast_value,
+        z = stat$z.ratio[i],
+        d = cohens_d,
+        lower_CI = lower.CL,
+        upper_CI = upper.CL,
+        p = stat$p.value[i],
+        stringsAsFactors = FALSE
+      ))
+    }
+    result_df <- round_two_spaces(table_df = result_df, start_col = 3)
+    result_df <- round_p(table_df = result_df, p_col = ncol(result_df))
+    return(result_df)
+  }
+  
+  get_LMM_results <- function(LMM = LMM, Bonf = FALSE){
+    
+    summary <- summary(LMM)
+
+    shorter_model_header <- paste("parameters for linear mixed model")
+    
+    # Extract coefficients
+    coefficients <- summary$coefficients
+    
+    conf = confint(LMM, method="Wald")
+    # Find the row index for '(Intercept)'
+    intercept_row <- which(rownames(conf) == "(Intercept)")
+    # Keep only the rows from '(Intercept)' on
+    conf <- conf[(intercept_row):nrow(conf), ]
+    #rename conf cols
+    colnames(conf) <- c("lower_CI", "upper_CI")
+    
+    # Combine the two into a new data frame
+    coefficients <- cbind(coefficients, conf)
+    
+    # Create a data frame
+    fixed <- data.frame(
+      predictor = rownames(coefficients), beta = coefficients[, "Estimate"],
+      t = coefficients[, "t value"], df = coefficients[, "df"],  
+      lower_CI = coefficients[, "lower_CI"], upper_CI = coefficients[, "upper_CI"],
+      p = coefficients[, "Pr(>|t|)"]
+    )
+    
+    # Compute standard errorsstd_error <- coefficients[, "Std. Error"]
+    fixed$predictor <- gsub("\\(Intercept\\)", "intercept", fixed$predictor)
+    fixed$predictor <- gsub("longaxisposterior", "long axis", fixed$predictor)
+    fixed$predictor <- gsub("delay28d", "delay", fixed$predictor)
+    fixed$predictor <- gsub("emotionnegative", "emotion", fixed$predictor)
+    fixed$predictor <- gsub(":", " × ", fixed$predictor)
+    
+    fixed <- round_two_spaces(table_df = fixed, start_col = 2, end_col = ncol(fixed)-1)
+    if (Bonf){fixed$p = fixed$p*2}
+    fixed <- round_p(table_df = fixed)
+    
+    fixed$`95% CI` <- paste(fixed$lower_CI, ", ", fixed$upper_CI, sep = "")
+    
+    fixed$`t (df)` <- paste0(fixed$t, " (", fixed$df, ")")
+    fixed <- as.data.frame(fixed[, c("predictor", "t (df)", "p","beta","95% CI")])
+    rownames(fixed) <- NULL
+    # Extract the standard deviations of the random effects
+    random <- as.data.frame(VarCorr(LMM))
+    if ("Residual" %in% random$grp) {
+      random <- random[random$grp != "Residual", ]
+    }
+    # Delete var2
+    random$var2 <- NULL
+    ngrps <- as.data.frame(summary[["ngrps"]])
+    colnames(ngrps) <- "n"
+    random$n <- ngrps[,1]
+    # Rename values in the grp_var1 column
+    random$grp <- gsub("stimulusTypeNum", "stimulus (intercept)", random$grp)
+    random$grp <- gsub("set", "stimulus set (intercept)", random$grp)
+    random$grp <- gsub("Name", "participant (intercept)", random$grp)
+    # Find the row index where the 'grp' column has the value "participant"
+    participant_row <- which(random$grp == "participant (intercept)")
+    # Rearrange the rows so that the participant row comes first
+    random <- rbind(random[participant_row, ], random[-participant_row, ])
+    # Rename columns vcov and sdcor
+    names(random)[names(random) == "vcov"] <- "variance"
+    names(random)[names(random) == "sdcor"] <- "SD"
+    # Select the desired columns in the final data frame
+    random <- as.data.frame(random[, c("grp", "variance", "SD","n")])
+    random = round_two_spaces(table_df = random, start_col = 2, end_col=ncol(random)-1)
+    colnames(random)[1] <- "random effects"
+    
+    # Calculate R-squared values
+    r2_values <- r.squaredGLMM(gLMM)
+    # Create a data frame with the results
+    r2 <- data.frame(
+      marginal = r2_values["theoretical", "R2m"],
+      conditional = r2_values["theoretical", "R2c"],
+      row.names = "R2"
+    )
+    
+    r2 <- as.data.frame(round_two_spaces(table_df = r2, start_col = 1, end_col = ncol(r2)))
+    # Add a new column with the name "R2" and NA as its value
+    r2 <- data.frame(R2 = NA, r2)
+    # write string for note
+    r2_note <- paste0("marginal R² / conditional R²: ", paste(r2$marginal, "/", r2$conditional))
+    
+    # Define the number of rows for each section
+    n_fixed_rows <- nrow(fixed) + 1 # 2 extra for the title and header row
+    n_random_rows <- nrow(random) + 1
+    
+    # Create an empty dataframe with the total number of rows and columns equal to the largest dataframe
+    combined_df <- data.frame(matrix(ncol = ncol(fixed), nrow = n_fixed_rows + n_random_rows +1)) # 1 extra line for r2
+    # Add "Fixed Effects" title in the first column
+    combined_df[1, 1] <- "fixed effects"
+    # Add fixed data
+    combined_df[1, 2:ncol(fixed)] <- colnames(fixed)[2:ncol(fixed)]
+    combined_df[1, 4] <- "\u03B2" # unicode for lower case beta
+    combined_df[2:(n_fixed_rows), ] <- as.data.frame(fixed)
+    
+    combined_df[n_fixed_rows + 1, 1:ncol(random)] <- colnames(random)
+    combined_df[(n_fixed_rows + 2):(n_fixed_rows + n_random_rows), 1:ncol(random)] <- as.data.frame(random)
+    
+    combined_df <- as.data.frame(combined_df)
+    # Create a new row with the desired header
+    header_row_df <- data.frame(matrix(ncol = ncol(combined_df), nrow = 1))
+    header_row_df[1, 1] <- shorter_model_header
+    # Combine the header row with the existing data frame
+    combined_df <- bind_rows(header_row_df, combined_df)
+    combined_df[nrow(combined_df),1] = r2_note
+    if (Bonf){
+      combined_df[2,3] = "p cor"
+    }
+    
+    result <- list(
+      combined_df = combined_df,
+      shorter_model_header = shorter_model_header, model_header = model_header
+    ) 
+    
+    return(result)
+  }   
+  
+  create_LMM_table <- function(result = result, file_name, save = TRUE, show = TRUE) {
+    
+    table_df <- result$combined_df
+    
+    # find rows of fixed and random effetc title
+    row_predictor <- which(table_df$X1 == "fixed effects")
+    row_random_effects <- which(table_df$X1 == "random effects")
+    # Calculating the number of rows between the two rows
+    number_predictors <- row_random_effects - row_predictor - 1 
+    number_predictors
+    # Counting the number of rows after the "random effects" row
+    number_random_effects <- nrow(table_df) - row_random_effects - 1  # 3 extra lines
+    number_random_effects
+    
+    ft <- flextable(table_df) %>%
+      delete_part(part = "header") %>%
+      merge_at(i=1, j=1:ncol(table_df))%>%
+      bold(i = 1) %>%
+      align(align = "center", i =1) %>%
+      align(align = "center", part = "all", j = 2:ncol(table_df)) %>%
+      hline(i=row_predictor, j=2:ncol(table_df), fp_border_default(color="black",width=1)) %>%
+      hline(i=row_random_effects, j=2:(ncol(table_df)-1), fp_border_default(color="black",width=1)) %>%
+      hline_top(j=1:ncol(table_df), border = fp_border_default
+                (color="black",width=1), part = "header") %>%
+      hline_top(j=1:ncol(table_df), border = fp_border_default
+                (color="black",width=1)) %>%
+      hline_bottom(j=1:ncol(table_df), border = 
+                     fp_border_default(color="black",width=1)) %>%
+      align(align = "center", part = "all", j = 2:ncol(table_df)) %>%
+      bold(i=c(row_predictor,row_random_effects), j=1) %>%
+      italic(i=row_predictor, j=c(3,4)) %>%
+      italic(i=row_random_effects, j=4) %>%
+      padding(i=c((row_predictor+1):(number_predictors+2)), j=1, padding.left=20) %>%
+      padding(i=c((row_random_effects+1):(row_random_effects + number_random_effects)), j=1, padding.left=20) %>%
+      line_spacing(space = 0.5, part = "body") %>%
+      #merge_at(i=nrow(table_df)-1, j=1:ncol(table_df))%>%
+      merge_at(i=nrow(table_df), j=1:ncol(table_df))%>%
+      add_footer_lines(as_paragraph("Source data are provided as Source Data file.")) %>%
+      padding(i=c(row_predictor, row_random_effects), padding.bottom=2) %>%
+      fontsize(size=10, part="all") %>%
+      autofit()
+    ft
+    
+    if(save){
+      table_path <- paste0(file_path, '/result_tables')
+      
+      if (!dir.exists(table_path)) {
+        dir.create(table_path)
+        cat("Directory created:", table_path, "\n")
+      } else {
+        cat("Directory already exists:", table_path, "\n")
+      }
+      
+      full_file_path <- normalizePath(paste0(table_path,"/",file_name, ".docx"))
+      save_as_docx(ft, path = full_file_path)
+      
+      # Conditionally open the created file
+      if (show) {
+        shell.exec(full_file_path)
+      }
+    }
+    return(ft)
+    
+  }
+  
+  get_postHoc_LMM <- function(emmeans, eff) {
+    # Initialize a data frame to hold the results
+    results <- data.frame()
+    emmeans <- as.data.frame(summary(emmeans)$contrast)
+    eff = as.data.frame(eff)
+    # Loop over unique contrast combinations
+    for (row_i in 1:nrow(emmeans)) {
+      contrast_df <- emmeans[row_i,]
+      eff_size_df <- eff[row_i, ]
+      # Construct the contrast string
+      contrast_string <- as.character(contrast_df$contrast)
+      
+      # Add any additional grouping columns that might exist between 'contrast' and 'estimate'
+      additional_columns <- setdiff(names(contrast_df), c("contrast", "estimate", "SE", "df", "t.ratio", "p.value"))
+      if (length(additional_columns) > 0) {
+        additional_values <- paste(contrast_df[, additional_columns], collapse = " in ")
+        contrast_string <- paste(contrast_string, additional_values, sep = " in ")
+      }
+      
+      
+      # Extract the necessary columns
+      result <- data.frame(
+        contrast = contrast_string,
+        t = contrast_df$t.ratio,
+        df = contrast_df$df,
+        d = eff_size_df$effect.size,
+        lower_CI = eff_size_df$lower.CL,
+        upper_CI = eff_size_df$upper.CL,
+        p = contrast_df$p.value,
+        stringsAsFactors = FALSE
+      )
+      
+      # Add the results to the master data frame
+      results <- rbind(results, result)
+    }
+    results <- round_two_spaces(table_df = results, start_col = 2, end_col = ncol(results) - 1) # Corrected `result` to `results`
+    results <- round_p(table_df = results)
+    return(results)
+  }
 
 # READ IN DATA####
   # path settings####
   # set working directory to where this script is stored
-    #rstudioapi::getActiveDocumentContext
     setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) 
     getwd() # check
   # read in data from /data
@@ -64,8 +1200,6 @@
       behavDf <- read_excel(file.path(file_path, "behav","behavDf.xlsx")) %>%
                   mutate(emotion = factor(emotion, levels = c("neutral","negative")),
                          delay = factor(delay))
-      # add sex to data frame to include in source data frame    
-      behavDf <- merge(behavDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
     # model RSA data 
       modelRSADf <- read_excel(file.path(file_path, "neuro", 'modelRSADf.xlsx')) %>% 
@@ -73,22 +1207,18 @@
                              Name = factor(Name), 
                              model = factor(model),
                              delay = factor(delay))
-      # add sex to data frame to include in source data frame    
-      modelRSADf <- merge(modelRSADf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
     # reinstatement data
       reinstatementDf <- read_excel(file.path(file_path, "neuro", "reinstatementDf.xlsx")) %>% 
         mutate(delay = factor(delay), 
                emotion = factor(emotion, levels=c('neutral','negative')), 
                Name = factor(Name)) 
-      # add sex to data frame to include in source data frame    
-        reinstatementDf <- merge(reinstatementDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
       
   # pilot study ####
     
     # sociodemography
     pilotDemoBeforeExclusionDf <- read_excel(file.path(file_path, "pilot","pilotDemoDf.xlsx")) %>%
-      mutate(sex = factor(gender))
+      mutate(sex = factor(sex))
     
     # all stimulus sets in pilot
     pilotAllSetsDf <- read_excel(file.path(file_path, "pilot","pilotAllSetsDf.xlsx")) %>% 
@@ -105,8 +1235,6 @@
              ratingScale = factor(ratingScale, levels = c("Per","Sem"), 
                                   labels = c("perceptual relatedness", "semantic relatedness"))) %>%
              aggregate(rating ~ Name + emotion + lureType + ratingScale, FUN = mean) # include sex for source data file
-    # add sex to data frame to include in source data frame    
-    pilotFinalSetsDf <- merge(pilotFinalSetsDf, pilotDemoBeforeExclusionDf[, c("Name", "sex")], by = "Name", all.x = TRUE)
     
 # FIGURE SETTINGS #####
   
@@ -137,7 +1265,6 @@
   
 # GROUPS DID NOT DIFFER IN ATTENTIVENESS DURING ENCODING (DAY 1)####
   # prepare data ####
-  
     longerEncRunDf <- controlDf %>%
                       dplyr::select(Name, delay, EncodingRun1_missedResponse, EncodingRun2_missedResponse, EncodingRun3_missedResponse)%>%
                       pivot_longer(cols = c(EncodingRun1_missedResponse, EncodingRun2_missedResponse, EncodingRun3_missedResponse),
@@ -150,20 +1277,23 @@
   
   # analyze data ####
     # describe 
+  
       meanDf <- aggregate(missedResponse ~ Name, FUN = sum,  data = longerEncRunDf)
       describe(meanDf$missedResponse)
       
     # ANOVA
-  
-      encoding.ANOVA <- aov_ez(
+      ANOVA <- aov_ez(
         "Name"
         ,"missedResponse"
         ,longerEncRunDf
         ,between=c("delay")
         ,within=c("run")
         ,anova_table="pes")
-      print(encoding.ANOVA)
-      summary(encoding.ANOVA)
+      summary(ANOVA)
+      
+      title <- "missed responses"
+      table_df <- get_ANOVA_results(ANOVA = ANOVA)
+      save_ANOVA_text(table_df=table_df, title, file_name = "output", show_file = TRUE) 
 
 # EMOTIONAL ENHANCEMENT OF IMMEDIATE FREE RECALL (DAY 1)####
   # prepare data ####
@@ -187,23 +1317,26 @@
       psych::describeBy(freeRecall ~ emotion, data = freeRecallDf)
     
     # run ANOVA
-      freeRecall.ANOVA <- aov_ez(
+      ANOVA <- aov_ez(
         "Name"
         ,"freeRecall"
         ,freeRecallDf 
         ,between=c("delay")
         ,within=c("emotion")
         ,anova_table="pes")
-      print(freeRecall.ANOVA)
-    
-    # post-hoc tests
-      freeRecall.emmeans <- emmeans(freeRecall.ANOVA, pairwise ~ emotion)#difference between emotion averaged over delay
-      summary(freeRecall.emmeans, adjust="sidak")
+      print(ANOVA)
       
-      with(freeRecallDf, cohensD(x = freeRecall[emotion=="negative"], 
-                                 y = freeRecall[emotion=="neutral"], 
-                                 method="paired"))
-
+      title <- "free recall"
+      table_df <- get_ANOVA_results(ANOVA = ANOVA)
+      save_ANOVA_text(table_df=table_df, title, file_name = "output", show_file = TRUE) 
+      
+    # post-hoc tests
+      emmeans <- emmeans(ANOVA, pairwise ~ emotion, adjust="sidak")#difference between emotion averaged over delay
+      table_df <- compute_effect_size_paired(emeans=emmeans, data = freeRecallDf, 
+                                             group_variable = NULL, within_variable = "emotion",
+                                             response_variable = "freeRecall")
+      save_postHoc_t_text(table_df = table_df, start_col =2, header_col = title)
+      
   # Supplementary Figure 2####
     
       svg("S1_freeRecall.svg")
@@ -258,54 +1391,55 @@
       
       psych::describeBy(cbind(hit, miss, missedResponse) ~ emotion + delay, 
                         data = oldsDf)
+      
+      # new meanDf for cohens d
+      meanDf <- aggregate(hit ~ Name + delay, FUN = mean, data = oldsDf) 
   
     # run ANOVA
-      hits.ANOVA <- aov_ez(
+      ANOVA <- aov_ez(
         "Name"
         ,"hit"
         ,oldsDf
         ,between=c("delay")
         ,within=c("emotion")
         ,anova_table="pes")
-      print(hits.ANOVA)
     
+     title = "hit"  
+     table_df <- get_ANOVA_results(ANOVA=ANOVA)
+     save_ANOVA_text(table_df, title = title)
+
     # post-hoc tests
       ##difference between emotions separately for each group
-      hits.emmeans <- emmeans (hits.ANOVA, pairwise ~ emotion|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(hits.emmeans, adjust="sidak") #sidak-adjustment if necessary
+      emmeans <- emmeans(ANOVA, pairwise ~ emotion|delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
       
-      #difference between delay averaging over emotion
-      hits.emmeans <- emmeans (hits.ANOVA, pairwise ~ delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(hits.emmeans, adjust="sidak") #sidak-adjustment if necessary
+      new_df <- compute_effect_size_paired(emmeans, data=oldsDf, group_variable='delay', 
+                          within_variable='emotion',response_variable='hit') 
+      table_df <- new_df
+      
+      # difference between delay averaging over emotion
+      emmeans <- emmeans (ANOVA, pairwise ~ delay, lmer.df = "satterthwaite",adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      stat <- as.data.frame(summary(emmeans)$contrasts) #sidak-adjustment if necessary
+      new_df <- compute_effect_size(emmeans, stat)
+      table_df <- rbind(table_df, new_df)
       
       #interaction contrast: difference in delay-dependent change in hits between emotions
-      hits.emmeans <- emmeans(hits.ANOVA, specs = ~ delay*emotion, lmer.df = "satterthwaite")
-      summary(hits.emmeans)
+      emmeans <- emmeans(ANOVA, specs = ~ delay*emotion, lmer.df = "satterthwaite")
+      emmeans
       
       neut.1d = c(1, 0, 0, 0)
       neut.28d = c(0, 1, 0, 0)
       neg.1d = c(0, 0, 1, 0)
       neg.28d = c(0, 0, 0, 1)
       
-      pairs(contrast(hits.emmeans, method = list("neut 1d - neut 28d" = neut.1d - neut.28d,
-                                                 "neg 1d - neg 28d" = neg.1d - neg.28d)),adjust="sidak")
-      
-      # run new meansDf for cohensD!
-      meanDf <- aggregate(hit ~ Name + delay, FUN = mean, data = oldsDf) 
+      # interaction contrast
+      stat <- pairs(contrast(emmeans, method = list("neut 1d - neut 28d" = neut.1d - neut.28d,
+                                   "neg 1d - neg 28d" = neg.1d - neg.28d)),adjust="sidak")
+      new_df <- compute_effect_size_interaction(emmeans, stat)
+      # Appending the new results to the existing data frame
+      table_df <- rbind(table_df, new_df)
 
-      with(meanDf, cohensD(x = hit[delay=="1d" ], 
-                          y = hit[delay=="28d"],
-                          method="unequal"))
-      
-      with(oldsDf, cohensD(x = hit[delay=="28d" & emotion=="neutral"], 
-                           y = hit[delay=="28d"& emotion=="negative"],
-                           method="paired"))
-      
-      with(oldsDf, cohensD(x = hit[delay=="1d" & emotion=="negative"], 
-                           y = hit[delay=="1d"& emotion=="neutral"],
-                           method="paired"))
-  
-  
+      save_postHoc_t_text(table_df=table_df, start_col = 2, header_row = title, round = TRUE)
+     
   # check influence of outliers ####
     # check outlier 
       data <- oldsDf
@@ -368,14 +1502,15 @@
         my_theme
       dev.off()
   
-    # add to source_data ####
+  # add to source_data Figure 2a left ####
       addWorksheet(wb, "Figure2A_left")
       # Write the data into sheet
       subset_df <- subset(oldsDf, select = c("Name", "delay", "emotion", "hit"))
       subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file 
+      
       writeData(wb, "Figure2A_left", subset_df)
       
-  # Supplementary Table 1 ####
+  # Supplementary Table X ####
     # old items 
       # reduce data frame
       oldRawDf <- aggregate(cbind(hit, miss, missedResponse) ~ Name + delay + emotion, FUN = sum, 
@@ -397,10 +1532,10 @@
       
     # add to source_data ####
       # old items
-      addWorksheet(wb, "SupplementaryTable2_oldItems")
+      addWorksheet(wb, "SupplementaryTable1_oldItems")
       # Write the data into sheet
       subset_df <- merge(oldRawDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file 
-      writeData(wb, "SupplementaryTable2_oldItems", subset_df)
+      writeData(wb, "SupplementaryTable1_oldItems", subset_df)
       
       # lures
       subset_df <- merge(luresRawDf, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
@@ -409,9 +1544,9 @@
       # Use the plyr package's mapvalues function to rename levels
       subset_df$lureType <- plyr::mapvalues(subset_df$itemType, from = names(level_names), to = level_names)
       # add worksheet
-      addWorksheet(wb, "SupplementaryTable2_lures")
+      addWorksheet(wb, "SupplementaryTable1_lures")
       # Write the data into sheet
-      writeData(wb, "SupplementaryTable2_lures", subset_df)
+      writeData(wb, "SupplementaryTable1_lures", subset_df)
       
 # DELAY DEPENDENT INCREASE IN FALSE ALARMS SPECIFICALLY FOR SEMANTICALLY RELATED LURES (DAY 2) ####
   # prepare data ####
@@ -421,29 +1556,50 @@
                          data = subset(behavDf, itemType != 'old'))%>% # take only lures 
               mutate(FA = FA /30*100,# get percent
                      lureType = factor(itemType, levels = c("new","per","sem"))) #new=unrelated, #per=perceptually related, #sem=semantically related
-  
+      # compute cohens d over factor emotion
+      meanDf <- aggregate(FA ~ Name + delay + lureType, FUN = function(x) mean(x, na.rm = TRUE), 
+                          data = luresDf)
+      
   # analyze data ####
-    # run ANOVA
-      FAs.ANOVA <- aov_ez(
+    # run ANOVA #####
+      ANOVA <- aov_ez(
         "Name"
         ,"FA"
         ,luresDf
         ,between=c("delay")
         ,within=c("emotion","lureType")
         ,anova_table="pes")
-      print(FAs.ANOVA)
-  
-    # post-hoc tests
-      #effect of delay depending on lure type
-      FAs.emmeansDelayLure <- emmeans (FAs.ANOVA, pairwise ~ delay|lureType, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansDelayLure, adjust="sidak") #sidak-adjustment if necessary
       
-      FAs.emmeansDelayLure <- emmeans (FAs.ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansDelayLure, adjust="sidak") #sidak-adjustment if necessary
+      table_df <- get_ANOVA_results(ANOVA)
+      save_ANOVA_text(table_df, title="FAs In Recognition")
+  
+    # post-hoc tests ##########
+      # 
+      title <- "delay effect per lureType"
+      emmeans <- emmeans (ANOVA, pairwise ~ delay|lureType, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      stat  <- summary(emmeans)$contrasts 
+      
+      new_df <- compute_effect_size(emmeans, stat)
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      table_df <- new_df
+      
+      #
+      title <- "lureType effect per delay"
+      emmeans <- emmeans (ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      stat  <- summary(emmeans)$contrasts 
+      new_df <- compute_effect_size_paired(emmeans = emmeans, group_variable = "delay", 
+                                 within_variable = "lureType", data = luresDf, response_variable = "FA")
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
       
       #interaction contrast: difference increase in FAs over time between lure types
-      FAs.emmeans <- emmeans(FAs.ANOVA, specs = ~ delay*lureType, lmer.df = "satterthwaite")
-      summary(FAs.emmeans)
+      title = "difference in delay effect between lureTypes"
+      emmeans <- emmeans(ANOVA, specs = ~ delay*lureType, lmer.df = "satterthwaite")
+      summary(emmeans) # to see order of conditions and use them for contrast
       
       sem.1d = c(0, 0, 0, 0, 1, 0)
       sem.28d = c(0, 0, 0, 0, 0, 1)
@@ -452,83 +1608,125 @@
       per.1d = c(0, 0, 1, 0, 0, 0)
       per.28d = c(0, 0, 0, 1, 0, 0)
       
-      pairs(contrast(FAs.emmeans, method = list("sem 1d - sem 28d" = sem.1d - sem.28d,
-                                                "new 1d - new 28d" = new.1d - new.28d,
-                                                "per 1d - per 28d" = per.1d - per.28d)),adjust="sidak") 
-      #
-      FAs.emmeansEmoLureDelay <- emmeans (FAs.ANOVA, pairwise ~ emotion|lureType:delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansEmoLureDelay, adjust="sidak")
+      stat <- pairs(contrast(emmeans, method = list("sem 1d - sem 28d" = sem.1d - sem.28d,
+                                                   "new 1d - new 28d" = new.1d - new.28d,
+                                                   "per 1d - per 28d" = per.1d - per.28d)),adjust="sidak") 
+      # compute effect size with ci and write all into table
+      new_df <- compute_effect_size_interaction(emmeans, stat, model = ANOVA)
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
       
-      #for plotting
-      #differences between lure types depending on delay
-      FAs.emmeansDelayLure <- emmeans (FAs.ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansDelayLure, adjust="sidak") #sidak-adjustment if necessary
+      # paired t-test      
+      title = "emotion effect per lureType and delay"
+      emmeans <- emmeans(ANOVA, pairwise ~ emotion|lureType:delay, lmer.df = "satterthwaite", adjust="sidak")#satterwhaite for fastening up computation, does not change results of contrasts
+      stat  <- summary(emmeans)$contrasts 
+      new_df <- compute_effect_size_paired(emmeans=emmeans, data=luresDf, group_variable=c("delay","lureType"),
+                                        within_variable="emotion", response_variable="FA")
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
       
-      #differences between lure types depending on emotion and delay
-      FAs.emmeansEmoLureDelay <- emmeans (FAs.ANOVA, pairwise ~ lureType|emotion:delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansEmoLureDelay, adjust="sidak")
+      # paired t-test
+      title <- "lureType effect per emotion and delay"
+      emmeans <- emmeans(ANOVA, pairwise ~ lureType|emotion:delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      new_df <- compute_effect_size_paired(emmeans=emmeans, data=luresDf, group_variable=c("delay","emotion"),
+                                           within_variable="lureType", response_variable="FA")
       
-      #differences between lure types depending on emotion and delay
-      FAs.emmeansEmoLureDelay <- emmeans (FAs.ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(FAs.emmeansEmoLureDelay, adjust="sidak")
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
+    
+      #interaction contrast
+      title <- "emotional enhancement of semantization over time"
+      emmean <- emmeans(ANOVA, specs = ~ emotion*lureType*delay, lmer.df = "satterthwaite")
+      summary(emmean) # to see order of conditions and use them for contrast
+      # order of conditions:
+      #1 neutral  new      1d      
+      #2 negative new      1d      
+      #3 neutral  per      1d      
+      #4 negative per      1d     
+      #5 neutral  sem      1d - > we need this         
+      #6 negative sem      1d - > we need this    
+      #7 neutral  new      28d   
+      #8 negative new      28d     
+      #9 neutral  per      28d     
+      #10 negative per      28d     
+      #11 neutral  sem      28d - > we need this       
+      #12 negative sem      28d - > we need this       
       
-      # compute cohens d over factor emotion
-      meanDf <- aggregate(FA ~ Name + delay + lureType, FUN = function(x) mean(x, na.rm = TRUE), 
-                          data = luresDf)
+      sem_neut_1d = c(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0)
+      sem_neg_1d = c(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0)
+      sem_neut_28d = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
+      sem_neg_28d = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+    
+
+      title <- "emotion effect in sem per delay"
+      stat <- pairs(contrast(emmean, method = list("sem neut 1d - sem neg 1d" = sem_neut_1d - sem_neg_1d,
+                                                   "sem neut 28d - sem neg 28d" = sem_neut_28d - sem_neg_28d)), adjust="sidak") 
+      new_df <- compute_effect_size_interaction(emmeans, stat, model = ANOVA)
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
       
-      with(meanDf, cohensD(x = FA [delay == "1d" & lureType == "new"], 
-                           y = FA [delay == "1d" & lureType == "per"], 
-                           method = 'paired'))
-      
-      with(meanDf, cohensD(x = FA [delay == "28d" & lureType == "new"], 
-                           y = FA [delay == "28d" & lureType == "per"], 
-                           method = 'paired'))
-      
-      with(meanDf, cohensD(x = FA [delay == "1d" & lureType == "sem"], 
-                           y = FA [delay == "28d" & lureType == "sem"], 
-                           method = 'unequal'))
-  
-      #sem 1d: neutr vs neg
-      with(luresDf, cohensD(x = FA[delay=="1d" & lureType=="sem" & emotion=="negative"], 
-                            y = FA[delay=="1d" & lureType=="sem" & emotion=="neutral"], 
-                            method = 'paired'))
-      ###sem 28d: neutr vs neg
-      with(luresDf, cohensD(x = FA[delay=="28d" & lureType=="sem" & emotion=="negative"], 
-                            y = FA[delay=="28d" & lureType=="sem" & emotion=="neutral"], 
-                            method = 'paired'))
-  
+      # two-sample t-test
+      title <- "delay effect per lureType and emotion"
+      emmeans <- emmeans (ANOVA, pairwise ~ delay|lureType:emotion, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      stat  <- summary(emmeans)$contrasts #sidak-adjustment if necessary
+      new_df <- compute_effect_size(emmeans=emmeans,  model = ANOVA)
+      # Adding the title column
+      new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+      # add to results table
+      table_df <- rbind(table_df, new_df)
+      table_df
+
+      save_postHoc_t_text(table_df = table_df, header_row = "posthoc FAs", start_col = 3)
+
       # post-hoc ANOVAs to check whether the emotion x delay interaction depends on lure type
         # ANOVA for semantically related only
-          semFAs.ANOVA <- aov_ez(
+         ANOVA <- aov_ez(
             "Name"
             ,"FA"
             ,subset(luresDf, lureType == "sem")
             ,between=c("delay")
             ,within=c("emotion")
             ,anova_table="pes")
-          print(semFAs.ANOVA)
-          summary(semFAs.ANOVA)
+          
+         table_df <- get_ANOVA_results(ANOVA)
+         save_ANOVA_text(table_df, title = "emo x delay anova in sem")
         
         # ANOVA for unrelated only
-          newFAs.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"FA"
             ,subset(luresDf, lureType == "new")
             ,between=c("delay")
             ,within=c("emotion")
             ,anova_table="pes")
-          print(newFAs.ANOVA)
+          
+          table_df <- get_ANOVA_results(ANOVA)
+          save_ANOVA_text(table_df, title = "emo x delay anova in new")
         
         # ANOVA for perceptually related only
-          perFAs.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"FA"
             ,subset(luresDf, lureType == "per")
             ,between=c("delay")
             ,within=c("emotion")
             ,anova_table="pes")
-          print(perFAs.ANOVA)
-        
+          
+          table_df <- get_ANOVA_results(ANOVA)
+          save_ANOVA_text(table_df, title = "emo x delay anova in per")
+          
   # check influence of outliers ####
     # find outliers depending on each condition 
       data <- luresDf # copy dataframe
@@ -693,11 +1891,12 @@
     level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
     # Use the plyr package's mapvalues function to rename levels
     subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+    # lures
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
     # add to source_data
     addWorksheet(wb, "Figure2A_right")
     writeData(wb, "Figure2A_right", subset_df)
-  # Supplementary Results #####
-    # false alarms weighted by confidence ####
+  # false alarms weighted by confidence ####
       # preprare data 
         luresWeightedDf <- subset(behavDf, itemType != 'old') %>% # take only lures
                            aggregate(FA_weighted ~ Name + delay + emotion + itemType, 
@@ -706,24 +1905,25 @@
                                   lureType = factor(itemType, levels = c("new","per","sem")) )
   
       # run ANOVA 
-        FAs.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"FA"
           ,luresWeightedDf
           ,between=c("delay")
           ,within=c("emotion","lureType")
           ,anova_table="pes")
-        print(FAs.ANOVA)
-        summary(FAs.ANOVA)
-  
+        
+        table_df <- get_ANOVA_results(ANOVA)
+        save_ANOVA_text(table_df, title = "FAs weighted by confidence")
+
       # post-hoc tests
         #effect of delay depending on lure type
-        FAs.emmeansDelayLure <- emmeans (FAs.ANOVA, pairwise ~ delay|lureType, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(FAs.emmeansDelayLure, adjust="sidak") #sidak-adjustment if necessary
+        emmeans <- emmeans (FAs.ANOVA, pairwise ~ delay|lureType, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans, adjust="sidak") #sidak-adjustment if necessary
         
         #interaction contrast: difference increase in FAs over time between lure types
-        FAs.emmeans <- emmeans(FAs.ANOVA, specs = ~ delay*lureType, lmer.df = "satterthwaite")
-        summary(FAs.emmeans)
+        emmeans <- emmeans(ANOVA, specs = ~ delay*lureType, lmer.df = "satterthwaite")
+        summary(emmeans)
         
         sem.1d = c(0, 0, 0, 0, 1, 0)
         sem.28d = c(0, 0, 0, 0, 0, 1)
@@ -732,19 +1932,24 @@
         per.1d = c(0, 0, 1, 0, 0, 0)
         per.28d = c(0, 0, 0, 1, 0, 0)
         
-        pairs(contrast(FAs.emmeans, method = list("sem 1d - sem 28d" = sem.1d - sem.28d,
+        stats <- pairs(contrast(emmeans, method = list("sem 1d - sem 28d" = sem.1d - sem.28d,
                                                   "new 1d - new 28d" = new.1d - new.28d,
                                                   "per 1d - per 28d" = per.1d - per.28d)),adjust="sidak") 
         
-        FAs.emmeansEmoLureDelay <- emmeans (FAs.ANOVA, pairwise ~ emotion|lureType:delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(FAs.emmeansEmoLureDelay, adjust="sidak")
+        table_df <- compute_effect_size_interaction(stat=stats,emmeans = emmeans, model = ANOVA, title = "interaction")
+        
+        save_postHoc_t_text(table_df=table_df,header_row = "interaction contrast weighted FAs")
+        
+        emmeans <- emmeans (ANOVA, pairwise ~ emotion|lureType:delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans)
+        
         
         #for plotting
         #differences between lure types depending on delay
-        FAs.emmeansDelayLure <- emmeans (FAs.ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(FAs.emmeansDelayLure, adjust="sidak") #sidak-adjustment if necessary
+        emmeans <- emmeans(ANOVA, pairwise ~ lureType|delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans) #sidak-adjustment if necessary
   
-    # Supplementary Figure 6 ######
+  # Supplementary Figure 6 ######
     
     svg("SupplementaryFigWeighted_unrelatedLures.svg")
     
@@ -836,7 +2041,7 @@
     dev.off()
   
   
-    # write into source_data ####
+    # write Supplementary Figure 6 into source_data ####
       # Write the data into sheet
       subset_df <- luresWeightedDf[, c("Name", "delay", "emotion", "lureType","FA_weighted")]
       # Define a named character vector of old and new level names
@@ -857,8 +2062,25 @@
                           (1| Name)+(1|stimulusTypeNum), data = semConfDf, family = "binomial", 
                         control=glmerControl(optimizer="bobyqa",
                                              optCtrl=list(maxfun=2e5))) 
-          summary(gLMM) 
-    
+          summary(gLMM)
+          
+          # Check for NA or NaN values
+          missing_values <- is.na(semConfDf$FA_confidency) | is.nan(semConfDf$FA_confidency)
+          
+          # Print a summary of the missing values
+          if (any(missing_values)) {
+            print("Missing or NaN values found in FA_confidency:")
+            print(semConfDf[missing_values, "FA_confidency"]) # Print the specific missing or NaN values
+          } else {
+            print("No missing or NaN values found in FA_confidency.")
+          }
+          
+          n_distinct(semConfDf$Name)
+          
+          file_name <- "gLMM_FA_confidency_sem"
+          result <- get_gLMM_results(gLMM=gLMM, title=title)
+          create_gLMM_table(result, file_name = "semConf")
+          
       # perceptually related lures 
         # prepare data 
           perConfDf <- subset(behavDf, itemType == 'per') %>%
@@ -868,20 +2090,36 @@
                           (1| Name)+(1|stimulusTypeNum), data = perConfDf, family = "binomial", 
                         control=glmerControl(optimizer="bobyqa",
                                              optCtrl=list(maxfun=2e5))) 
-          summary(gLMM)
+          
+          file_name <- "gLMM_FA_confidency_per"
+          result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+          create_gLMM_table(result, file_name = file_name)
+          
           
       # unrelated lures 
         # prepare data 
           newConfDf <- subset(behavDf, itemType == 'new') %>%
             dplyr::select(Name, delay, stimulusTypeNum, emotion, FA_confidency)
+          
+          n_distinct(newConfDf$Name)
         # run LMM
           gLMM <- glmer(FA_confidency ~ delay * emotion +
                           (1| Name), data = newConfDf, family = "binomial", 
                         control=glmerControl(optimizer="bobyqa",
                                              optCtrl=list(maxfun=2e5))) 
           
-          summary(gLMM) 
-      
+          file_name <- "gLMM_FA_confidency_new"
+          result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+          create_gLMM_table(result, file_name = file_name)
+      # add Supplementary Table 2 ####
+          subset_df <- subset(behavDf, itemType != 'old') %>%
+            dplyr::select(Name, delay, stimulusTypeNum, emotion, FA_confidency, itemType)
+          subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+          
+          # for supplementary table
+          addWorksheet(wb, "SupplementaryTable2")
+          writeData(wb, "SupplementaryTable2", subset_df)
+
 # MEMORY SPECIFICITY ON THE LEVEL OF EACH INDIVIDUAL RELATED STIMULUS SET #####
   # prepare data ####
     # reduce data frame without aggregating 
@@ -916,78 +2154,106 @@
       
       describe(meanDf$missingTransCategory_perc)
       
+      head(meanDf)
+      
+      # no difference between groups in missing categories
+      t.test(missingTransCategory ~ delay, data = meanDf)
+      cohen.d(meanDf$missingTransCategory, meanDf$delay) # from library effsize or psych # for d and ci
+      
       
       # SHOW MEAN AND SEM IN PERCENT
       psych::describeBy(cbind(detailed, forgotten, semOnly_transformed, 
                               perOnly_transformed) ~ emotion + delay, 
                               data = smaller_transformationDf)
       
-    # detailed memories 
+    # detailed memories #####
       #fit binomial generalized linear mixed model on detailed memory 
-      detailed_glmm <- glmer(detailed ~ delay * emotion +
+      gLMM <- glmer(detailed ~ delay * emotion +
                                (1| Name)+(1|set), data = transformationDf, family = "binomial", 
                              control=glmerControl(optimizer="bobyqa",
-                                                  optCtrl=list(maxfun=2e5))) 
+                                                  optCtrl=list(maxfun=2e5)))
+      summary(gLMM)
+      file_name <- "gLMM_detailed"
+      result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+      create_gLMM_table(result, file_name = file_name)
       
-      summary(detailed_glmm)
-      sjPlot::tab_model(detailed_glmm) # plot results table
-      # post-hoc test 
-      emmeans<- emmeans(detailed_glmm, pairwise ~ delay, lmer.df = "satterthwaite") #1d vs 28d
-      summary(emmeans, adjust="sidak")
-      eff_size(emmeans, sigma= sigma(detailed_glmm), edf = Inf)
+      # post-hoc test #####
+      # two sample
+      title <- "delay effect in detailed"
+      emmeans <- emmeans(gLMM, pairwise ~ delay, lmer.df = "satterthwaite", adjust="sidak") #1d vs 28d
       
-    # forgotten memories 
+      new_df <- get_z_results(emmeans, gLMM, title)
+      table_df <- new_df
+      table_df
+      save_z_text(table_df)
+      
+    # forgotten memories #####
       # fit binomial generalized linear mixed model on forgotten sets
-      forgotten_glmm <- glmer(forgotten ~ delay * emotion +
+      gLMM <- glmer(forgotten ~ delay * emotion +
                                 (1 | Name) + (1|set), data = transformationDf, family = "binomial", 
                               control=glmerControl(optimizer="bobyqa",
                                                    optCtrl=list(maxfun=2e5))) 
+      file_name = "gLMM_forgotten"
+      result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+      create_gLMM_table(result, file_name = file_name)
       
-      summary(forgotten_glmm)
-      sjPlot::tab_model(forgotten_glmm) # plot results table
-      
-      # post-hoc tests 
-      # difference between emotions at different delays
-      forgotten.emmeansEmoDelay <- emmeans (forgotten_glmm, pairwise ~ emotion|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(forgotten.emmeansEmoDelay, adjust="sidak") #sidak-adjustment if necessary
-      eff_size(forgotten.emmeansEmoDelay, sigma= sigma(forgotten_glmm), edf = Inf) #sigma is the smallest error SS from model
+      # post-hoc tests ####
+      # paired
+      title =  "difference between emotions at different delays forgotten"
+      emmeans <- emmeans (gLMM, pairwise ~ emotion|delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      table_df <- get_z_results(emmeans = emmeans, gLMM = gLMM, title=title)
+      table_df
       #neutral vs negative at 28d *
       
-      # difference between between delays in different emotions
-      forgotten.emmeansDelayEmo <- emmeans (forgotten_glmm, pairwise ~ delay|emotion, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(forgotten.emmeansDelayEmo, adjust="sidak") #sidak-adjustment if necessary
-      eff_size(forgotten.emmeansDelayEmo, sigma= sigma(forgotten_glmm), edf = Inf) #sigma is the smallest error SS from model
+      # two-sample
+      title <- "difference between between delays in different emotions forgotten"
+      emmeans <- emmeans (gLMM, pairwise ~ delay|emotion, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+      table_df <- get_z_results(emmeans = emmeans, gLMM = gLMM, title=title)
+      table_df
       #1d vs 28d in neutral ***   1d vs 28d in negative **
       
-      #interaction contrast: difference in delay-dependent increase between emotions
-      forgotten.emmeans<- emmeans(forgotten_glmm, specs = ~ delay*emotion, lmer.df = "satterthwaite")
-      summary(forgotten.emmeans)
+      #interaction contrast: 
+      title <- "difference in delay-dependent increase between emotions forgotten"
+      emmeans <- emmeans(gLMM, specs = ~ delay*emotion, lmer.df = "satterthwaite")
       
       neutral.1d = c(1, 0, 0, 0)
       neutral.28d = c(0, 1, 0, 0)
       negative.1d = c(0, 0, 1, 0)
       negative.28d = c(0, 0, 0, 1)
       
-      forgotten.emmeansInteraction <- pairs(contrast(forgotten.emmeans, method = list("neutral 28d - neutral 1d" = neutral.28d - neutral.1d, 
-                                                                                      "negative 28d - negative 1d" = negative.28d - negative.1d)),adjust="sidak")
-      summary(forgotten.emmeansInteraction) #higher increase in forgotten items for neutral than for negative **
+      stat <- pairs(contrast(emmeans, method = list("neutral 28d - neutral 1d" = neutral.28d - neutral.1d, 
+                                            "negative 28d - negative 1d" = negative.28d - negative.1d)),adjust="sidak")
+      summary(stat) #higher increase in forgotten items for neutral than for negative **
       
+
+      # eff size for interaction contrast
       
-    # semantically transformed memories 
+      new_df <- compute_effect_size_z_interaction(stat, gLMM, title)
+      table_df <- rbind(table_df, new_df)
+      
+      save_z_text(table_df)
+      
+    # semantically transformed memories #####
       #fit binomial generalized linear mixed model on semantically transformed memories
-      semOnly_transformed_glmm <- glmer(semOnly_transformed ~ delay * emotion +
+      gLMM <- glmer(semOnly_transformed ~ delay * emotion +
                                           (1 | Name) + (1|set), data = transformationDf, family = "binomial", 
                                         control=glmerControl(optimizer="bobyqa",
                                                              optCtrl=list(maxfun=2e5))) 
-      summary(semOnly_transformed_glmm)
+
+      file_name = "gLMM_semantically_transformed"
+      result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+      create_gLMM_table(result, file_name = file_name)
       
       # post-hoc tests 
-      # 1d vs 28d
-      emmeans<- emmeans(semOnly_transformed_glmm, pairwise ~ delay, lmer.df = "satterthwaite")
+      title =  "1d vs 28d in sem"
+      emmeans<- emmeans(gLMM, pairwise ~ delay, lmer.df = "satterthwaite")
       summary(emmeans) # 1d < 28d ***
+      table_df <- get_z_results(emmeans=emmeans, gLMM=gLMM, title=title)
+      table_df
       
       #interaction contrast: difference in delay-dependent increase between emotions
-      emmeans<- emmeans(semOnly_transformed_glmm, specs = ~ delay*emotion, lmer.df = "satterthwaite")
+      title = "difference in delay-dependent increase between emotions in sem"
+      emmeans<- emmeans(gLMM, specs = ~ delay*emotion, lmer.df = "satterthwaite")
       summary(emmeans)
       
       neutral.1d = c(1, 0, 0, 0)
@@ -995,29 +2261,47 @@
       negative.1d = c(0, 0, 1, 0)
       negative.28d = c(0, 0, 0, 1)
       
-      emmeansInteraction <- pairs(contrast(emmeans, method = list("neutral 28d - neutral 1d" = neutral.28d - neutral.1d, 
-                                                                  "negative 28d - negative 1d" = negative.28d - negative.1d)),adjust="sidak")
-      summary(emmeansInteraction)
+      stat <- pairs(contrast(emmeans, method = list("neutral 28d - neutral 1d" = neutral.28d - neutral.1d, 
+                                      "negative 28d - negative 1d" = negative.28d - negative.1d)),adjust="sidak")
+      summary(stat)
+      new_df <- compute_effect_size_z_interaction(stat, gLMM, title)
+      table_df <- rbind(table_df, new_df)
+      table_df
       
       # for plotting:
       # difference between emotions at different delays
       emmeansEmoDelay <- emmeans (semOnly_transformed_glmm, pairwise ~ emotion|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
       summary(emmeansEmoDelay, adjust="sidak") #sidak-adjustment if necessary #neutral vs negative n.s.
       eff_size(emmeansEmoDelay, sigma= sigma(semOnly_transformed_glmm), edf = Inf) 
+
       
       # difference between delays for different emotions
-      emmeansDelayEmo <- emmeans (semOnly_transformed_glmm, pairwise ~ delay|emotion, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-      summary(emmeansDelayEmo, adjust="sidak") #sidak-adjustment if necessary #1d vs 28d in neutral* 1d vs 28d in negative ***
-      eff_size(emmeansDelayEmo, sigma= sigma(semOnly_transformed_glmm), edf = Inf) 
+      title = "difference between delay in each emotion in sem"
+      emmeans <- emmeans (gLMM, pairwise ~ delay|emotion, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+       #1d vs 28d in neutral* 1d vs 28d in negative ***
+      new_df <- get_z_results(emmeans=emmeans, gLMM=gLMM, title=title)
+      table_df <- rbind(table_df, new_df)
+      table_df
       
-      # perceptually transformed memories 
+      save_z_text(table_df)
+      
+    # perceptually transformed memories #####
       #fit binomial generalized linear mixed model on perceptually transformed memory 
-      perOnly_transformed_glmm <- glmer(perOnly_transformed ~ delay * emotion +
+      gLMM <- glmer(perOnly_transformed ~ delay * emotion +
                                           (1 | Name) + (1|set), data = transformationDf, family = "binomial", 
                                         control=glmerControl(optimizer="bobyqa",
                                                              optCtrl=list(maxfun=2e5))) 
+      file_name = "gLMM_perceptually_transformed"
+      result <- get_gLMM_results(gLMM=gLMM, title=file_name)
+      create_gLMM_table(result, file_name = file_name)
       
-      summary(perOnly_transformed_glmm) 
+  # write Supplementary table 4 into source file data ####
+      subset_df <- transformationDf # before percentage was computed
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+      
+      # for supplementary table
+      addWorksheet(wb, "SupplementaryTable4")
+      writeData(wb, "SupplementaryTable4", subset_df)
       
   # Figure 2B ######
   # prepare data 
@@ -1142,7 +2426,6 @@
                                                              "forgotten", 
                                                              "semantically_transformed", 
                                                              "perceptually_transformed")] / 30 *100
-  
       # add to source_data
       addWorksheet(wb, "Figure2B")
       writeData(wb, "Figure2B", subset_df)
@@ -1174,109 +2457,146 @@
       # Use the plyr package's mapvalues function to rename levels
       subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
       
-      addWorksheet(wb, "SupplementaryTable1")
-      writeData(wb, "SupplementaryTable1", subset_df)
+      addWorksheet(wb, "SupplementaryTable5")
+      writeData(wb, "SupplementaryTable5", subset_df)
       
-      # analyze semantic relatedness rating #####
+     # analyze semantic relatedness rating #####
         # run ANOVA 
-          semRating.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"semRating"
             ,smaller_simRatingsDf
             ,between=c("delay")
             ,within=c("emotion","lureType")
             ,anova_table="pes")
-          print(semRating.ANOVA)
-          summary(semRating.ANOVA)
+          print(ANOVA)
+          summary(ANOVA)
+          
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = "semantic relatedness rating")
       
-        # post hoc tests 
-          semRating.emmeansDelayLure <- emmeans (semRating.ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-          summary(semRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
-          
-          with(meanDf, cohensD(x = semRating[lureType=="sem"], 
-                               y = semRating[lureType=="per"], 
-                               method="paired"))
-          
-          with(meanDf, cohensD(x = semRating[lureType=="sem"], 
-                               y = semRating[lureType=="new"], 
-                               method="paired"))
-            
-      # analyze perceptual relatedness rating ####
+        # paired
+          title = "semantic relatedness rating between lures" 
+          emmeans <- emmeans (ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite", adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+    
+          table_df <- compute_effect_size_paired(emmeans, data = smaller_simRatingsDf, 
+                                               within_variable = "lureType", 
+                                               response_variable = "semRating", 
+                                               group_variable = NULL)
+          save_postHoc_t_text(header_row = title, table_df = table_df)
+     
+     # analyze perceptual relatedness rating ####
         # run ANOVA 
-          perRating.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"percRating"
             ,smaller_simRatingsDf
             ,between=c("delay")
             ,within=c("emotion","lureType")
             ,anova_table="pes")
-          print(perRating.ANOVA)
-          summary(perRating.ANOVA)
+          
+          table_df <- get_ANOVA_results(ANOVA)
+          save_ANOVA_text(table_df, title = "perceptual relatedness rating")
         
         # post hoc tests 
-          #difference in perceptual relatedness rating between lure
-          perRating.emmeansDelayLure <- emmeans (perRating.ANOVA, pairwise ~ lureType, 
-                                                 lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-          summary(perRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
+          # paired
+          title <- "difference in perceptual relatedness rating between lure"
+          emmeans <- emmeans(ANOVA, pairwise ~ lureType, 
+                             lmer.df = "satterthwaite", adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans) 
           
-          perRating.emmeansDelayLure <- emmeans (perRating.ANOVA, pairwise ~ delay|lureType, 
-                                                 lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-          summary(perRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
+          new_df <- compute_effect_size_paired(emmeans = emmeans, data = smaller_simRatingsDf, within_variable = "lureType", response_variable = "percRating")
+
+          table_df <- new_df # init
+          table_df
           
-          perRating.emmeansDelayLure <- emmeans (perRating.ANOVA, pairwise ~ lureType|delay, 
-                                                 lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-          summary(perRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
+          # two-sample t test
+          title <- "difference between lure types within delay"
+          emmeans <- emmeans(ANOVA, pairwise ~ delay|lureType, 
+                                                 lmer.df = "satterthwaite", adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+          new_df <- compute_effect_size(emmeans = emmeans)
+          table_df <- rbind(table_df, new_df)
+          table_df
+          # paired
+          title <- "difference between luretypes in per rating within delay"
+          emmeans <- emmeans(ANOVA, pairwise ~ lureType|delay, 
+                                                 lmer.df = "satterthwaite", adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+          summary(perRating.emmeansDelayLure) # sidak adjustment when needed
+          new_df <- compute_effect_size_paired(emmeans, data = smaller_simRatingsDf, 
+                                               within_variable = "lureType", 
+                                               response_variable = "percRating", 
+                                               group_variable = "delay")
+          table_df <- rbind(table_df, new_df)
+          table_df
           
-          # watch out to define the new meanDf first!
-          meanDf <- aggregate(cbind(percRating, semRating) ~ Name + delay + lureType, 
-                              FUN = mean, data = smaller_simRatingsDf)
-          
-          with(meanDf, cohensD(x = percRating[lureType=="sem"], 
-                               y = percRating[lureType=="new"],
-                               method = 'paired'))
-          
-          with(meanDf, cohensD(x = percRating[lureType=="sem"], 
-                               y = percRating[lureType=="per"],
-                               method = 'paired'))
-          
-          with(meanDf, cohensD(x = semRating[lureType=="sem"], 
-                               y = percRating[lureType=="sem"], 
-                               method="paired"))
-          with(meanDf, cohensD(x = percRating[lureType=="per"], 
-                               y = semRating[lureType=="per"], 
-                               method="paired"))
-          
-          with(meanDf, t.test(percRating[lureType=="per"], 
-                              semRating[lureType=="per"], paired = TRUE)) 
-          
-          with(meanDf, t.test(percRating[lureType=="new"], 
-                              semRating[lureType=="new"], paired = TRUE)) 
-          with(meanDf, cohensD(percRating[lureType=="new"], 
-                               semRating[lureType=="new"], method = "paired")) 
-          
+          header_row = "posthoc perceptual relatedness rating"
+          save_postHoc_t_text(table_df = table_df, header_row = header_row)
     
     # difference between rating types in lures ####
-      # semantically related lurses
-        with(meanDf, t.test(semRating[lureType=="sem"], 
+       title = "difference in rating types in sem"
+        ttest <- with(meanDf, t.test(semRating[lureType=="sem"], 
                             percRating[lureType=="sem"], 
-                            paired = TRUE)) 
-        with(meanDf, cohensD(x = semRating[lureType=="sem"], 
-                y = percRating[lureType=="sem"], 
-                method="paired"))
+                            paired = TRUE))
+          # Convert to long format
+          long_meanDf <- meanDf %>%
+            filter(lureType == "sem") %>%
+            pivot_longer(
+              cols = c(percRating, semRating),
+              names_to = "ratingType",
+              values_to = "value"
+            ) %>%
+            mutate(ratingType = factor(ratingType))
+          
+        eff <- cohen.d(long_meanDf$value, long_meanDf$ratingType, alpha = 0.05)
+        
+        table_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
+        
+        unique(meanDf$lureType)
+       
       # perceptually related lures
-        with(meanDf, t.test(semRating[lureType=="per"], 
+        title = "difference in rating types in per"
+        ttest <- with(meanDf, t.test(semRating[lureType=="per"], 
                             percRating[lureType=="per"], 
                             paired = TRUE)) 
-        with(meanDf, cohensD(x = semRating[lureType=="per"], 
-                             y = percRating[lureType=="per"], 
-                             method="paired"))
+        # Convert to long format
+        long_meanDf <- meanDf %>%
+          filter(lureType == "per") %>%
+          pivot_longer(
+            cols = c(percRating, semRating),
+            names_to = "ratingType",
+            values_to = "value"
+          ) %>%
+          mutate(ratingType = factor(ratingType))
+        
+        eff <- cohen.d(long_meanDf$value, long_meanDf$ratingType, alpha = 0.05)
+        
+        new_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
+        table_df <- rbind(table_df, new_df)
+        
+
       # unrelated lures
-        with(meanDf, t.test(semRating[lureType=="new"], 
-                            percRating[lureType=="new"], 
-                            paired = TRUE)) 
-        with(meanDf, cohensD(x = semRating[lureType=="new"], 
-                             y = percRating[lureType=="new"], 
-                             method="paired"))
+        title = "difference in ratingTypes in new"
+        ttest <- with(meanDf, t.test(x = semRating[lureType=="new"], 
+                                          y = percRating[lureType=="new"], 
+                                          paired=TRUE))
+        long_meanDf <- meanDf %>%
+          filter(lureType == "new") %>%
+          pivot_longer(
+            cols = c(percRating, semRating),
+            names_to = "ratingType",
+            values_to = "value"
+          ) %>%
+          mutate(ratingType = factor(ratingType))
+        
+        
+        eff <- cohen.d(long_meanDf$value, long_meanDf$ratingType, alpha = 0.05)
+        
+        new_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
+        table_df <- rbind(table_df, new_df)
+        table_df
+        
+        save_postHoc_t_text(table_df=table_df, header_row = "differences in ratings within lures", round = FALSE)
+
 
     # check influence of outliers #####
       data <- smaller_simRatingsDf
@@ -1462,7 +2782,7 @@
       
       dev.off()
       
-    # Write to source data file ####
+  # Write Figure 3a to source data file ####
       
       subset_df <- meanDf %>%
         dplyr::rename(perceptual_relatedness = percRating, semantic_relatedness = semRating) 
@@ -1512,7 +2832,7 @@
     
   dev.off()
   
-  # Write to source data file ####
+  # Write Supplementary Figure 3 to source data file ####
     subset_df <- smaller_simRatingsDf %>%
       dplyr::rename(perceptual_relatedness = percRating, semantic_relatedness = semRating) %>%
       dplyr::select(Name, delay, emotion, lureType, perceptual_relatedness, semantic_relatedness)
@@ -1550,11 +2870,14 @@
 
   # analyze data ####
     # fit binomial generalized linear mixed model with group mean centered ratings 
-      glmm <- glmer(FA ~ delay*semRatingGroupMeanCent*percRatingGroupMeanCent*emotion + 
+      gLMM <- glmer(FA ~ delay*semRatingGroupMeanCent*percRatingGroupMeanCent*emotion + 
                       (1 | Name) + (1 | stimulusTypeNum), data = simRatingsDf, family = "binomial",
                     control=glmerControl(optimizer="bobyqa",
                                          optCtrl=list(maxfun=2e5))) 
-      summary(glmm)
+      
+      file_name <- "gLMM_FA_relatedness"
+      result <-  get_gLMM_results(gLMM = gLMM, title = title)
+      ft <- create_gLMM_table(result=result, file_name = file_name)
     
     # FOR COMPARISON: fit binomial generalized linear mixed model with grand mean centered ratings 
       # grand mean centering ratings 
@@ -1598,19 +2921,15 @@
       
       dev.off()
     
-  # Write into source_data ####
+  # Write Figure 3 and Supplementary Table 6 into source_data ####
     subset_df <- simRatingsDf %>%
       dplyr::rename(perceptual_relatedness_centered = percRatingGroupMeanCent, semantic_relatedness_centered = semRatingGroupMeanCent) %>%
-      dplyr::select(Name, delay, emotion, lureType, stimulusTypeNum, perceptual_relatedness_centered, semantic_relatedness_centered)
-      
-    # Define a named character vector of old and new level names
-    level_names <- c("per" = "perceptually related", "sem" = "semantically related", "new" = "unrelated")
-    # Use the plyr package's mapvalues function to rename levels
-    subset_df$lureType <- plyr::mapvalues(subset_df$lureType, from = names(level_names), to = level_names)
+      dplyr::select(Name, delay, emotion, stimulusTypeNum, perceptual_relatedness_centered, semantic_relatedness_centered)
+ 
     subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
     
-    addWorksheet(wb, "Figure3b")
-    writeData(wb, "Figure3b", subset_df)
+    addWorksheet(wb, "Figure3b_SupplementaryTable6")
+    writeData(wb, "Figure3b_SupplementaryTable6", subset_df)
     
 # FA FOR SEMANTICALLY RELATED LURES LOW VS HIGH IN SEMANTIC RELATEDNESS ####
   #median split
@@ -1620,20 +2939,31 @@
   simRatingsDf$percGroup <- simRatingsDf$percRating #new variable for median split the perceptual relatedness rating
   simRatingsDf$percGroup <- ifelse(simRatingsDf$percGroup <= median, 'lowpercRating', 'highpercRating') #group perceptual relatedness rating depending whether low/equal or higher than median
 
-
   # prepare file for glmm
   semOnlyDf <- subset(simRatingsDf, lureType == "sem") %>%  # only semantically related lures
               dplyr::select(Name, delay, semRating, emotion, stimulusTypeNum, FA, percGroup) %>%
               mutate(percGroup = factor(percGroup, levels=c("lowpercRating","highpercRating")))
     
   # run glmm
-  glmm <- glmer(FA ~ percGroup*delay*emotion + 
+  gLMM <- glmer(FA ~ percGroup*delay*emotion + 
                   (1 | Name) + (1 | stimulusTypeNum), 
                 data = semOnlyDf, 
                 family = "binomial",
                 control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5))) 
-  summary(glmm) #no difference of high or low perceptual relatedness on the probability for a false alarm
-
+  summary(gLMM) #no difference of high or low perceptual relatedness on the probability for a false alarm
+  
+  file_name = "gLMM_sem_lowVsHighInPercRel"
+  result <-  get_gLMM_results(gLMM = gLMM, title = file_name)
+  ft <- create_gLMM_table(result=result, file_name = file_name)
+  
+  # add Supplementary Table 7 to Source Data file ##### 
+    subset_df <- semOnlyDf %>%
+      dplyr::select(Name, delay, emotion, stimulusTypeNum, FA, percGroup)
+    
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+    
+    addWorksheet(wb, "SupplementaryTable7")
+    writeData(wb, "SupplementaryTable7", subset_df)
 # MODEL-BASED REPRESENTATIONAL-SIMILARITY ANALYSIS####
   # HIPPOCAMPAL LONG AXIS ####
     # LEFT HIPPOCAMPUS ######
@@ -1660,16 +2990,16 @@
           summary(results.ANOVA)
         
         # post hoc tests 
-          #anterior vs posterior separately for both groups
-          lHC.emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*longaxis, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(lHC.emmeans, adjusts="sidak") #adjustment if necessary
+          title = "anterior vs posterior separately for both groups"
+          emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*longaxis, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans) #adjustment if necessary
           
           # significant decrease in fit from 1d to 28d in anterior HC (after exclusion from one outlier) in model 1
           # significant decrease in fit from 1d to 28d in anterior HC (after exclusion from one outlier) in model 2
           
-          #anterior vs posterior separately for both groups
-          lHC.emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*emotion*longaxis, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(lHC.emmeans, adjusts="sidak") #adjustment if necessary
+          title = "anterior vs posterior separately for both groups"
+          emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*emotion*longaxis, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+          summary(.emmeans) #adjustment if necessary
           
           # trend p = 0.760 in model 2 (1d-28d, aHC) that disappears after outlier exclusion, i.e. is driven by one outlier
       
@@ -1802,168 +3132,30 @@
       
         # analyze data ####
           # run ANOVA before outlier exclusion
-            results.ANOVA <- aov_ez(
+            ANOVA <- aov_ez(
               "Name"
               ,"fit"
               ,longaxisL_modelRSADf
               ,between=c("delay")
               ,within=c("emotion","model","longaxis")
               ,anova_table="pes")
-            print(results.ANOVA) # -> not consistent with previous data (outlier sj07 biased results, especially for model 2) -> outlier corrected data further used
-            summary(results.ANOVA)
+            print(ANOVA) # -> not consistent with previous data (outlier sj07 biased results, especially for model 2) -> outlier corrected data further used
+            summary(ANOVA)
+            
+            header_row <- "model comparison RSA in HC"
+            table_df <- get_ANOVA_results(ANOVA = ANOVA)
+            save_ANOVA_text(table_df = table_df, title = header_row)
         
         # post hoc tests
-          # anterior vs posterior separately for both groups
-            lHC.emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*longaxis, 
+          # two_sample
+            title = "delay effect separately for model and longaxis"
+            emmeans <- emmeans (ANOVA,pairwise ~ delay|model*longaxis, adjust="sidak",
                                     lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-            summary(lHC.emmeans, adjusts="sidak") #adjustment if necessary
+            summary(emmeans) #adjustment if necessary
             
-            
-            lHC.emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*emotion*longaxis, 
-                                    lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-            summary(lHC.emmeans, adjusts="sidak") #adjustment if necessary
-            
-            meanDf <- aggregate(fit ~ Name + delay + model + longaxis, 
-                                FUN = mean, data = longaxisL_modelRSADf)
-          
-          # anterior 
-            ### model 1: 1d vs 28d
-            with(meanOverEmo, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                              & model == "model3"], 
-                                      y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                              & model == "model3"],
-                                      method = 'unequal'))
-            
-            ### model 3: 1d vs 28d
-            with(meanOverEmo, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                              & model == "model1"], 
-                                      y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                              & model == "model1"],
-                                      method = 'unequal'))
-            
-            ### model 1 negative: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model1" & emotion == "negative"], 
-                                               y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model1" & emotion == "negative"], 
-                                               method = 'unequal'))
-            
-            ### model 1 neutral: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model1" & emotion == "neutral"], 
-                                               y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model1" & emotion == "neutral"], 
-                                               method = 'unequal'))
-            
-            
-            ### model 3: 1d vs 28d
-            with(meanOverEmo, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                              & model == "model3"], 
-                                      y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                              & model == "model3"], 
-                                      method = 'unequal'))
-            
-            ### model 3 negative: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model3" & emotion == "negative"], 
-                                               y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model3" & emotion == "negative"], 
-                                               method = 'unequal'))
-            
-            ### model 3 neutral: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model3" & emotion == "neutral"], 
-                                               y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                                       & model == "model3" & emotion == "neutral"], 
-                                               method = 'unequal'))
-            
-            
-            ### model 2: 1d vs 28d
-            with(meanOverEmo, cohensD(x = fit[delay == "1d" & longaxis == "anteriorHC_L" 
-                                              & model == "model2"], 
-                                      y = fit[delay == "28d" & longaxis == "anteriorHC_L" 
-                                              & model == "model2"], 
-                                      method = 'unequal'))
-            
-            ### model 2 neutral: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                                       & model=="model2" & emotion=="neutral"],
-                                               y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                                       & model=="model2" & emotion=="neutral"],
-                                               method = 'unequal'))
-            
-            ### model 2 negative: 1d vs 28d
-            with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                                       & model=="model2" & emotion=="negative"],
-                                               y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                                       & model=="model2" & emotion=="negative"],
-                                               method = 'unequal'))
-            
-        # posterior 
-          ### model 1: 1d vs 28d
-          with(meanOverEmo, cohensD(x = fit[delay== "1d" & longaxis=="posteriorHC_L" 
-                                            & model=="model1"],
-                                    y = fit[delay=="28d" & longaxis=="posteriorHC_L" 
-                                            & model=="model1"],
-                                    method = 'unequal'))
-          
-          ### model 1 negative: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model1" & emotion=="negative"],
-                                             y = fit[delay=="28d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model1" & emotion=="negative"],
-                                             method = 'unequal'))
-          
-          ### model 1 neutral: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model1" & emotion=="neutral"],
-                                             y = fit[delay=="28d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model1" & emotion=="neutral"],
-                                             method = 'unequal'))
-          
-          
-          ### model 3: 1d vs 28d
-          with(meanOverEmo, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                            & model=="model3"],
-                                    y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                            & model=="model3"],
-                                    method = 'unequal'))
-          
-          
-          ### model 3 negative: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                                     & model=="model3" & emotion=="negative"],
-                                             y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                                     & model=="model3" & emotion=="negative"],
-                                             method = 'unequal'))
-          
-          ### model 3 neutral: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                                     & model=="model3" & emotion=="neutral"],
-                                             y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                                     & model=="model3" & emotion=="neutral"],
-                                             method = 'unequal'))
-          
-          ### model 2: 1d vs 28d
-          with(meanOverEmo, cohensD(x = fit[delay== "1d" & longaxis=="anteriorHC_L" 
-                                            & model=="model2"],
-                                    y = fit[delay=="28d" & longaxis=="anteriorHC_L" 
-                                            & model=="model2"],
-                                    method = 'unequal'))
-          
-          ### model 2 neutral: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model2" & emotion=="negative"],
-                                             y = fit[delay=="28d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model2" & emotion=="negative"],
-                                             method = 'unequal'))
-          
-          ### model 2 negative: 1d vs 28d
-          with(longaxisL_modelRSADf, cohensD(x = fit[delay== "1d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model2" & emotion=="neutral"],
-                                             y = fit[delay=="28d" & longaxis=="posteriorHC_L" 
-                                                     & model=="model2" & emotion=="neutral"],
-                                             method = 'unequal'))
+            new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+            new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+            table_df <- new_df
         
         # Figure 4b ####
           #drop outlier for whole plot as it is also dropped for the ANOVA 
@@ -2105,7 +3297,7 @@
             my_theme
           
           dev.off()
-      # save to source_data #####
+      # save Figure 4b to source_data #####
         subset_df <- longaxisL_modelRSADf[!(longaxisL_modelRSADf$Name=="sj07"),] 
           
         # Define a named character vector of old and new level names
@@ -2287,73 +3479,51 @@
             #anterior vs posterior separately for both groups
             rHC.emmeans <- emmeans (results.ANOVA,pairwise ~ delay|model*emotion*longaxis, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
             summary(rHC.emmeans, adjusts="sidak") #adjustment if necessary
-            eff_size(rHC.emmeans, sigma = Inf, edf = 50) #sigma is the smallest error SS from model
+            eff_size(rHC.emmeans, sigma = Inf, edf = 50) 
 
   # NEOCORTEX#####
     # neocortical memory ROI #####
       # analyze data ####
-            
         # ANOVA 
-          neocort.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"neocorticalMemoryROI"
             ,modelRSADf
             ,between=c("delay")
             ,within=c("emotion","model")
             ,anova_table="pes")
-          print(neocort.ANOVA)
-          summary(neocort.ANOVA)
+          print(ANOVA)
+          summary(ANOVA)
+          
+          header_row = "model RSA in neocortex"
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = header_row)
         
         # post hoc tests 
+          # two sample
+          title = "delay effect within each model"
+          emmeans <- emmeans (ANOVA, pairwise ~ delay|model, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans) #adjustment if necessary
           
-          neocort.emmeans <- emmeans (neocort.ANOVA, pairwise ~ delay|model, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(neocort.emmeans, adjusts="sidak") #adjustment if necessary
+          new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+          new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+          table_df <- new_df
           
-          neocort.emmeans <- emmeans (neocort.ANOVA, pairwise ~ model|delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(neocort.emmeans, adjusts="sidak") #adjustment if necessary
+          # paired 
+          title = "difference between models within each delay"
+          emmeans <- emmeans (ANOVA, pairwise ~ model|delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans) #adjustment if necessary
+          
+
+          new_df <- compute_effect_size_paired(emmeans = emmeans, data = modelRSADf, group_variable = "delay", 
+                                       within_variable = "model", response_variable = "neocorticalMemoryROI")
+          new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+          table_df <- rbind(table_df, new_df)
+          
+          save_postHoc_t_text(table_df = table_df, start_col = 3, header_row = header_row)
           
           #prepare Df
           meanDf <- aggregate(neocorticalMemoryROI ~ Name + delay + model, FUN = mean, data = modelRSADf)
-          
-          # Calculate Cohen's d for model2
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="1d" & model=="model2"], 
-                               y = neocorticalMemoryROI[delay=="28d" & model=="model2"], 
-                               method = "unequal"))
-          
-          # Calculate Cohen's d for model3
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="1d" & model=="model3"], 
-                               y = neocorticalMemoryROI[delay=="28d" & model=="model3"], 
-                               method = "unequal"))
-          
-          # Calculate Cohen's d for model1
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="1d" & model=="model1"], 
-                               y = neocorticalMemoryROI[delay=="28d" & model=="model1"], 
-                               method = "unequal"))
-          
-          #difference in fit between models in seperate delay groups
-          neocort.emmeans <- emmeans (neocort.ANOVA, pairwise ~ model|delay, 
-                                      lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(neocort.emmeans, adjusts="sidak") #adjustment if necessary
-          
-          # Calculate Cohen's d for model1 vs model2 at delay 1d
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="1d" & model=="model1"], 
-                               y = neocorticalMemoryROI[delay=="1d" & model=="model2"], 
-                               method = "paired"))
-          
-          # Calculate Cohen's d for model2 vs model3 at delay 1d
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="1d" & model=="model2"], 
-                               y = neocorticalMemoryROI[delay=="1d" & model=="model3"], 
-                               method = "paired"))
-          
-          # Calculate Cohen's d for model2 vs model1 at delay 28d
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="28d" & model=="model2"], 
-                               y = neocorticalMemoryROI[delay=="28d" & model=="model1"], 
-                               method = "paired"))
-          
-          # Calculate Cohen's d for model2 vs model3 at delay 28d
-          with(meanDf, cohensD(x = neocorticalMemoryROI[delay=="28d" & model=="model2"], 
-                               y = neocorticalMemoryROI[delay=="28d" & model=="model3"], 
-                               method = "paired"))
         
       # check influence of outliers #####
         # look for outliers 
@@ -2506,7 +3676,7 @@
         dev.off()
       
       # save to source_data ####
-        subset_df <- modelRSADf[, 1:6] %>% # copy second to third column into new df
+        subset_df <- modelRSADf[, 2:6] %>% # copy second to third column into new df
         dplyr::rename(fit_in_neocorticalMemoryROI = neocorticalMemoryROI) 
         subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
         
@@ -2514,102 +3684,132 @@
         writeData(wb, "Figure5_upperPanel", subset_df)
     # individual ROIs ####
       # vmPFC ####
-        vmPFC.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"vmPFC"
           ,subset(modelRSADf, model == "model2")
           ,between=c("delay")
           ,within=c("emotion")
           ,anova_table="pes")
-        print(vmPFC.ANOVA)
-        summary(vmPFC.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        header_row = "model 2 in vmPFC"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = header_row)
       
-        vmpPFC.emmeans <- emmeans (vmPFC.ANOVA, pairwise ~ delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(vmpPFC.emmeans, adjust="sidak") #adjustment if necessary
+        # post hoc tests
+        # two-sample
+        title = "delay effect in model 2"
+        emmeans <- emmeans (ANOVA, pairwise ~ delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans) #adjustment if necessary
         
-        meanDf <- aggregate(vmPFC ~ Name + delay, FUN = mean, 
-                            data = subset(modelRSADf, model == "model2"))
+        new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+        new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+        table_df <- new_df
         
-        with(meanDf, cohensD(x = vmPFC[delay=="1d"], 
-                             y = vmPFC[delay=="28d"], 
-                             method="unequal"))
+        save_postHoc_t_text(table_df = table_df, start_col = 3, header_row = header_row)
         
       # IFG####
-        IFG.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"IFG"
           ,subset(modelRSADf, model == "model2")
           ,between=c("delay")
           ,within=c("emotion")
           ,anova_table="pes")
-        print(IFG.ANOVA)
-        summary(IFG.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        header_row = "model 2 in IFG"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = header_row)
         
       # aCC ####
-        ACC.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"aCC"
           ,subset(modelRSADf, model == "model2")
           ,between=c("delay")
           ,within=c("emotion")
           ,anova_table="pes")
-        print(ACC.ANOVA)
-        summary(ACC.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        header_row = "model 2 in aCC"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = header_row)
+        
       # Angular Gyrus####
         # right #####
-          angularGyrus_R.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"angularGyrus_R"
             ,subset(modelRSADf, model == "model2")
             ,between=c("delay")
             ,within=c("emotion")
             ,anova_table="pes")
-          print(angularGyrus_R.ANOVA)
-          summary(angularGyrus_R.ANOVA)
+          print(ANOVA)
+          summary(ANOVA)
+          
+          header_row = "model 2 in AG R"
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = header_row)
         
-          angularGyrus_R.emmeans <- emmeans (angularGyrus_R.ANOVA, pairwise ~ delay, 
+          # posthoc
+          # two-sample
+          titel = "delay effect in model 2 in AG R"
+          emmeans <- emmeans(ANOVA, pairwise ~ delay, adjust="sidak",
                                              lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-          summary(angularGyrus_R.emmeans, adjust="sidak") #adjustment if necessary
+          summary(emmeans) #adjustment if necessary
           
-          meanDf <- aggregate(angularGyrus_R ~ Name + delay, FUN = mean, 
-                              data = subset(modelRSADf, model == "model2"))
+          new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+          new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+          table_df <- new_df
           
-          with(meanDf, cohensD(x = angularGyrus_R[delay=="1d"], 
-                               y = angularGyrus_R[delay=="28d"]), 
-                              method = "unequal")
-          
+          save_postHoc_t_text(table_df = table_df, start_col = 3, header_row = header_row)
+
         # left ####
-          angularGyrus_L.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"angularGyrus_L"
             ,subset(modelRSADf, model == "model2")
             ,between=c("delay")
             ,within=c("emotion")
             ,anova_table="pes")
-          print(angularGyrus_L.ANOVA)
-          summary(angularGyrus_L.ANOVA)
+          print(ANOVA)
+          summary(ANOVA)
+          
+          header_row = "model 2 in AG L"
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = header_row)
           
       # Precuneus #####
-        
-        Precuneus.ANOVA <- aov_ez(
-                          "Name"
-                          ,"Precuneus"
-                          ,subset(modelRSADf, model == "model2")
-                          ,between=c("delay")
-                          ,within=c("emotion")
-                          ,anova_table="pes")
-        print(Precuneus.ANOVA)
-        summary(Precuneus.ANOVA)
-        
-        Precuneus.emmeans <- emmeans (Precuneus.ANOVA, pairwise ~ delay, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(Precuneus.emmeans, adjust="sidak") #adjustment if necessary
-        
-        meanDf <- aggregate(Precuneus ~ Name + delay, FUN = mean, 
-                            data = subset(modelRSADf, model == "model2"))
-        
-        with(meanDf, cohensD(x = Precuneus[delay=="1d"], 
-                             y = Precuneus[delay=="28d"]), 
-                              method = "unequal")
+          ANOVA <- aov_ez(
+            "Name"
+            ,"Precuneus"
+            ,subset(modelRSADf, model == "model2")
+            ,between=c("delay")
+            ,within=c("emotion")
+            ,anova_table="pes")
+          print(ANOVA)
+          summary(ANOVA)
+          
+          header_row = "model 2 in Precuneus"
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = header_row)
+          
+          # posthoc
+          # two-sample
+          title <- "delay effect in model 2 in Prec"
+          emmeans <- emmeans (ANOVA, pairwise ~ delay, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans) #adjustment if necessary
+          
+          new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+          new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+          table_df <- new_df
+          
+          save_postHoc_t_text(table_df = table_df, start_col = 3, header_row = header_row)
         
       # Figure 5 lower panel #####
         plot_data <- subset(modelRSADf, model == "model2") %>%
@@ -2750,42 +3950,44 @@
         
     # sensory control ROIs #####
       # occipital pole ####
-      
-        results.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"occPole"
           ,modelRSADf
           ,between=c("delay")
           ,within=c("emotion","model")
           ,anova_table="pes")
-        print(results.ANOVA)
-        summary(results.ANOVA)
-     
-        results.emmeans <- emmeans (results.ANOVA, pairwise ~ model, lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(results.emmeans, adjust="sidak") #adjustment if necessary
+        print(ANOVA)
+        summary(ANOVA)
         
-        meanDf <- aggregate(occPole ~ Name + model, FUN = mean, 
-                            data = modelRSADf) # mean over emotion and delay
+        header_row = "model 2 in occPole"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = header_row)
         
-        with(meanDf, cohensD(occPole[mean$model=='model1'], 
-                              occPole[mean$model=='model3'], 
-                              method="paired"))
+        # posthoc 
+        title = "delay effect"
+        emmeans <- emmeans (ANOVA, pairwise ~ model, lmer.df = "satterthwaite", adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans) #adjustment if necessary
         
-        with(meanDf, cohensD(occPole[model=='model2'], 
-                              occPole[model=='model3'], 
-                              method="paired"))
-      
+        new_df <- compute_effect_size(emmeans = emmeans, model = ANOVA)
+        new_df <- data.frame(title = rep(title, nrow(new_df)), new_df)
+        table_df <- new_df
+        save_postHoc_t_text(table_df = table_df, start_col = 3, header_row = header_row)
+
       # Heschl's gyrus ####
-        
-        heschl.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"HeschlGyrus"
           ,modelRSADf
           ,between=c("delay")
           ,within=c("emotion","model")
           ,anova_table="pes")
-        print(heschl.ANOVA)
-        summary(heschl.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        header_row = "model 2 in heschl"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = header_row)
       
 # MEMORY REINSTATEMENT OVER TIME #####
   # HIPPOCAMPAL LONGAXIS #####  
@@ -2819,23 +4021,56 @@
       # change in memory reinstatement over time ####
         # analyze data ####
           # run linear mixed model
-            LMM_lHC <- lmer(ERS ~ delay*emotion*longaxis +
+            LMM <- lmer(ERS ~ delay*emotion*longaxis +
                               (1 | Name) + (1 | set), 
                             data = longaxisL_ERSDf)
-            summary(LMM_lHC)
+          
+            file_name = "LMM_ERS_lHC"
+            result <- get_LMM_results(LMM = LMM, Bonf = TRUE)
+            ft <- create_LMM_table(result=result, file_name = file_name)
             
-            results.emmeans <- emmeans (LMM_lHC, pairwise ~ delay | longaxis, lmer.df = "satterthwaite", lmerTest.limit = 6240) #satterwhaite for fastening up computation, does not change results of contrasts
-            summary(results.emmeans, adjust="sidak") #adjustment if necessary
+            # two-sample
+            emmeans <- emmeans (LMM, pairwise ~ delay | longaxis, lmer.df = "satterthwaite", lmerTest.limit = 6240, adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+            eff <- eff_size(emmeans, sigma=sigma(LMM), edf = 122)
 
-            emmeans(pairwise) 
-        
+            table_df <- get_postHoc_LMM(emmeans, eff)
+            print(table_df)
+            
+          # paired
+            emmeans <- emmeans (LMM, pairwise ~ longaxis | delay, lmer.df = "satterthwaite", lmerTest.limit = 6240, adjust="sidak") #satterwhaite for fastening up computation, does not change results of contrasts
+            eff <- eff_size(emmeans, sigma=sigma(LMM), edf = 122)
+            
+            table_df <- rbind(table_df, get_postHoc_LMM(emmeans, eff))
+            print(table_df)
+            
+            save_postHoc_t_text(table_df = table_df, header_row = "ERS in lHC", round = FALSE)
+            
+          # add Supplementary Table 8 to Source Data file  
+            subset_df <- longaxisL_ERSDf
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+            
+            addWorksheet(wb, "SupplementaryTable8")
+            writeData(wb, "SupplementaryTable8", subset_df)
+            
           # hits only
             hitsLongaxisL_ERSDf <- subset(mergedERSDf, hit == "1")
             
-            LMM_lHC_hit <- lmer(ERS ~ delay*emotion*longaxis +
+            LMM <- lmer(ERS ~ delay*emotion*longaxis +
                               (1 | Name) + (1 | set), data = hitsLongaxisL_ERSDf)
-            summary(LMM_lHC_hit)
-          
+            summary(LMM)
+            
+            file_name = "LMM_ERS_hitONLY_lHC"
+            result <- get_LMM_results(LMM = LMM, Bonf = TRUE)
+            ft <- create_LMM_table(result=result, file_name = file_name)
+            
+            # add Supplementary Table 9 to Source Data file  
+            subset_df <- hitsLongaxisL_ERSDf
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+            
+            addWorksheet(wb, "SupplementaryTable9")
+            writeData(wb, "SupplementaryTable9", subset_df)
+            
+
         # Figure 6 right upper panel #####
           # anterior hippocampus 
             svg("Figure6Upper_leftAnteriorHC.svg")
@@ -2896,15 +4131,17 @@
             
             dev.off()
           
-        # add to source data file ####
+        # add Figure 6 upper panel to source data file ####
           subset_df <- longaxisL_ERSDf %>%
               aggregate(ERS ~ Name + delay + emotion + longaxis, 
                         FUN = mean)
           
-          # rename levels to make it consistent with previous sheet
+          # rename levels to make it consistent with previous sheet 
           level_names <- c("anterior" = "anterior_hippocampus", "posterior" = "posterior_hippocampus")
           # Use the plyr package's mapvalues function to rename levels
           subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+          subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+          
             
           addWorksheet(wb, "Figure6_upperPanel")
           writeData(wb, "Figure6_upperPanel", subset_df)
@@ -2915,20 +4152,33 @@
             
         # analyze data ####
           # semantically related lures 
-          glmm_semFA <- glmer(sem_FA ~ ERS*emotion*delay +
+          gLMM <- glmer(sem_FA ~ ERS*emotion*delay +
                                 (1| Name)+(1|set), data =  postHCERSDf, family = "binomial", 
                               control=glmerControl(optimizer="bobyqa",
                                                    optCtrl=list(maxfun=2e5))) 
-          summary(glmm_semFA)
+          summary(gLMM)
+          
+          file_name = "gLMM_ERS_semFA_lpHC"
+          title = "ERS"
+          
+          result <- get_gLMM_results(gLMM = gLMM, title = title)
+          ft <- create_gLMM_table(result=result, file_name = file_name)
+          
           
           # perceptually related lures 
-          glmm_perFA <- glmer(per_FA ~ ERS*emotion*delay +
+          gLMM <- glmer(per_FA ~ ERS*emotion*delay +
                                 (1| Name)+(1|set), data =  postHCERSDf, 
                               family = "binomial", 
                               control=glmerControl(optimizer="bobyqa",
                                                    optCtrl=list(maxfun=2e5))) 
-          summary(glmm_perFA)
+          summary(gLMM)
         
+          file_name = "gLMM_ERS_perFA_lpHC"
+          title = "ERS"
+          result <- get_gLMM_results(gLMM = gLMM, title = title)
+          ft <- create_gLMM_table(result=result, file_name = file_name)
+          
+          
         # Figure 6 lower right panel ####
           # semantically related lures
             svg("Figure6lower_semanticallyRelated.svg")
@@ -2960,37 +4210,57 @@
             
             dev.off()
         
-        # add to source data file ####
+        # add Figure 6 and Supplementary Table 12 to source data file ####
             subset_df <- postHCERSDf %>%
-              dplyr::select(Name, emotion, delay, set, ERS, sem_FA) %>%
+              dplyr::select(Name, emotion, delay, set, ERS, sem_FA, per_FA) %>%
               dplyr::rename(posteriorHippocampal_ERS = ERS) 
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+            
 
-            addWorksheet(wb, "Figure6_lowerPanel")
-            writeData(wb, "Figure6_lowerPanel", subset_df)
+            addWorksheet(wb, "Figure6_SupplementaryTable10")
+            writeData(wb, "Figure6_SupplementaryTable10", subset_df)
             
         # additional analyses ####
-          # hits
-            glmm <- glmer(hit ~ ERS*emotion*delay +
+          # hits ####
+            gLMM <- glmer(hit ~ ERS*emotion*delay +
                                 (1| Name)+(1|set), data = postHCERSDf, 
                               family = "binomial", 
                               control=glmerControl(optimizer="bobyqa",
                                                    optCtrl=list(maxfun=2e5))) 
-            summary(glmm)
+            summary(gLMM)
+            
+            file_name = "gLMM_ERS_hits_lpHC"
+            title = "ERS"
+            result <- get_gLMM_results(gLMM = gLMM, title = title)
+            ft <- create_gLMM_table(result=result, file_name = file_name)
+            
+            header_row = "pHC ERS and hits"
+            save_gLMM_text(table_df = table_df, title = header_row)
+            
+            # add Supplementary 10 to source data file #### #####
+            subset_df <- postHCERSDf %>%
+              dplyr::select(Name, emotion, delay, set, ERS, hit) %>%
+              dplyr::rename(posteriorHippocampal_ERS = ERS) 
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+            
+            addWorksheet(wb, "SupplementaryTable10")
+            writeData(wb, "SupplementaryTable10", subset_df)
         
-          # detailed   
-            glmm_detailed <- glmer(detailed ~ ERS*emotion*delay +
+          # detailed ####  
+            gLMM <- glmer(detailed ~ ERS*emotion*delay +
                                      (1| Name)+(1|set), data = postHCERSDf, 
                                    family = "binomial", 
                                    control=glmerControl(optimizer="bobyqa",
                                                         optCtrl=list(maxfun=2e5))) 
-            summary(glmm_detailed)
+            summary(gLMM)
+            
+            file_name = "gLMM_ERS_detailed_lpHC"
+            result <- get_gLMM_results(gLMM = gLMM, title = title)
+            ft <- create_gLMM_table(result=result, file_name = file_name)
+            
+            save_gLMM_text(table_df = table_df, title = header_row)
           
-          # reaction time
-            LMM <- lmer(reactionTime ~ ERS*delay*emotion +
-                          (1 | Name)+(1|set), data = postHCERSDf)
-            summary(LMM)#
-        
-          # Supplementary Figure 4 
+            # Supplementary Figure 4 
             svg("S4_ERSandDetailedMemory.svg", height = 8, width = 12)
             
             p <- plot_model(glmm_detailed, type = "pred", terms = c("ERS[all]","emotion","delay"), 
@@ -3005,13 +4275,33 @@
               my_theme
             
             dev.off()
-         # add to source data file ####
+            # add Supplementary Figure 4 and Supplementary Table 11 to source data file ####
             subset_df <- postHCERSDf %>%
               dplyr::select(Name, emotion, delay, set, ERS, detailed) %>%
               dplyr::rename(posteriorHippocampal_ERS = ERS) 
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
             
-            addWorksheet(wb, "SupplementaryFigure4")
-            writeData(wb, "SupplementaryFigure4", subset_df)
+            
+            addWorksheet(wb, "SupplFig4_SupplTab11")
+            writeData(wb, "SupplFig4_SupplTab11", subset_df)
+          
+          # reaction time
+            LMM <- lmer(reactionTime ~ ERS*delay*emotion +
+                          (1 | Name)+(1|set), data = postHCERSDf)
+            summary(LMM)
+            
+            file_name = "LMM_ERS_RT_lpHC"
+            result <- get_LMM_results(LMM = LMM)
+            ft <- create_LMM_table(result=result, file_name = file_name)
+        
+         # Supplementary Table 13 to source data file ####
+            subset_df <- postHCERSDf %>%
+              dplyr::select(Name, emotion, delay, set, ERS, reactionTime) %>%
+              dplyr::rename(posteriorHippocampal_ERS = ERS) 
+            subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+            
+            addWorksheet(wb, "SupplementaryTable13")
+            writeData(wb, "SupplementaryTable13", subset_df)
             
     # right hippocampus #####
       # prepare data ####
@@ -3047,10 +4337,16 @@
                       (1 | Name) + (1 | set), data = longaxisL_EncSemSimDf)
         summary(LMM)#
         
-      # post hoc tests
-        lHC.emmeans <- emmeans (LMM,pairwise ~ longaxis, lmerTest.limit = 6240, 
+        file_name = "LMM_EncSemSim_lHC"
+        result <- get_LMM_results(LMM = LMM)
+        ft <- create_LMM_table(result=result, file_name = file_name)
+        
+      # post hoc tests ####
+        emmeans <- emmeans (LMM,pairwise ~ longaxis, lmerTest.limit = 6240, adjusts="sidak",
                                 lmer.df = "satterthwaite") #satterwhaite for fastening up computation, does not change results of contrasts
-        summary(lHC.emmeans, adjusts="sidak") #adjustment if necessary
+        summary(emmeans) #adjustment if necessary
+        
+      #  eff <- eff_size(emmeans, sigma=sigma(LMM), edf=?)
   
     # Supplementary Figure 5 ####
 
@@ -3091,6 +4387,7 @@
       level_names <- c("anterior" = "anterior_hippocampus", "posterior" = "posterior_hippocampus")
       # Use the plyr package's mapvalues function to rename levels
       subset_df$longaxis <- plyr::mapvalues(subset_df$longaxis, from = names(level_names), to = level_names)
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
       
       addWorksheet(wb, "SupplementaryFigure5")
       writeData(wb, "SupplementaryFigure5", subset_df)
@@ -3110,6 +4407,20 @@
       LMM <- lmer(EncPercSim ~ delay*emotion*longaxis +
                     (1 | Name), data = longaxisL_EncPercSimDf)
       summary(LMM)
+      
+      file_name = "LMM_EncPercSim_lHC"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
+      
+      # add Supplementary 14 to source data file ####
+      subset_df <- postHCERSDf %>%
+        dplyr::select(Name, emotion, delay, set, ERS, sem_FA, per_FA) %>%
+        dplyr::rename(posteriorHippocampal_ERS = ERS) 
+      subset_df <- merge(longaxisL_EncPercSimDf, longaxisL_EncSemSimDf, by = c("Name","set","delay","emotion","longaxis"))
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+      
+      addWorksheet(wb, "SupplementaryTable14")
+      writeData(wb, "SupplementaryTable14", subset_df)
     
 # EXPLORE REINSTATEMENT IN THE NEOCORTEX ####
   # ERS ####
@@ -3117,187 +4428,200 @@
   
     LMM <- lmer(neocorticalMemoryROI ~ delay*emotion +
                   (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                  (1 | Name), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                  (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(Precuneus ~ delay*emotion +
-                  (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(vmPFC ~ delay*emotion +
-                  (1 | Name), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(IFG ~ delay*emotion +
-                  (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
-    
-    LMM <- lmer(aCC ~ delay*emotion +
-                  (1 | Name), data = ERSDf)
-    summary(LMM)#
+
+    file_name = "LMM_ERS_neocorticalMemoryROI"
+    result <- get_LMM_results(LMM = LMM)
+    ft <- create_LMM_table(result=result, file_name = file_name)
     
     LMM <- lmer(occPole ~ delay*emotion +
                   (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
+    
+    file_name = "LMM_ERS_occPole"
+    result <- get_LMM_results(LMM = LMM)
+    ft <- create_LMM_table(result=result, file_name = file_name)
     
     LMM <- lmer(HeschlGyrus ~ delay*emotion +
                   (1 | Name)+(1|set), data = ERSDf)
-    summary(LMM)#
+    
+    file_name = "LMM_ERS_HeschlGyrus"
+    result <- get_LMM_results(LMM = LMM)
+    ft <- create_LMM_table(result=result, file_name = file_name)
+  
+  # add Supplementary Table 15 to source data file ####    
+    subset_df <- ERSDf %>%
+      dplyr::select(Name, emotion, delay, set, neocorticalMemoryROI, occPole, HeschlGyrus) 
+    subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+    
+    addWorksheet(wb, "SupplementaryTable15")
+    writeData(wb, "SupplementaryTable15", subset_df)
     
   # reinstatement by related lures #####
     
-    # reinstatement by semantically related lures ####
+  # reinstatement by semantically related lures ####
+    # prepare data ####
       EncSemSimDf <-  subset(reinstatementDf, itemType == 'sem' & EncRuns == 'AllEncRuns')
-      
+    # run analysis ####  
       LMM <- lmer(neocorticalMemoryROI ~ delay*emotion +
                     (1 | Name)+(1|set), data = EncSemSimDf)
-      summary(LMM)#
       
-      LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                    (1 | Name), data = EncSemSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                    (1 | Name)+(1|set), data = ESSDf)
-      summary(LMM)#
-      
-      LMM <- lmer(Precuneus ~ delay*emotion +
-                    (1 | Name)+(1|set), data = ESSDf)
-      summary(LMM)#
-      
-      LMM <- lmer(vmPFC ~ delay*emotion +
-                    (1 | Name), data = ESSDf)
-      summary(LMM)#
-      
-      LMM <- lmer(IFG ~ delay*emotion +
-                    (1 | Name)+(1|set), data = ESSDf)
-      summary(LMM)#
-      
-      LMM <- lmer(aCC ~ delay*emotion +
-                    (1 | Name), data = ESSDf)
-      summary(LMM)#
-      
+      file_name = "LMM_EncSemSim_neocorticalMemoryROI"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
+    
       LMM <- lmer(occPole ~ delay*emotion +
-                    (1 | Name)+(1|set), data = ESSDf)
-      summary(LMM)#
+                    (1 | Name)+(1|set), data = EncSemSimDf)
+      
+      file_name = "LMM_EncSemSim_occ"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
       
       LMM <- lmer(HeschlGyrus ~ delay*emotion +
-                    (1 | Name), data = ESSDf)
-      summary(LMM)#
+                    (1 | Name)+(1|set), data = EncSemSimDf)
+      summary(LMM)
+      file_name = "LMM_EncSemSim_Hescl"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
       
-    # reinstatement by perceptually related lures ####
+    # add Supplementary Table 16 to source data file ####    
+      subset_df <- EncSemSimDf %>%
+        dplyr::select(Name, emotion, delay, set, neocorticalMemoryROI, occPole, HeschlGyrus) 
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+      
+      addWorksheet(wb, "SupplementaryTable16")
+      writeData(wb, "SupplementaryTable16", subset_df)
+
+  # reinstatement by perceptually related lures ####
+    # prepare data ####  
       EncPercSimDf <-  subset(reinstatementDf, itemType == 'per' & EncRuns == 'AllEncRuns')
-      
+    # run analysis ####  
       LMM <- lmer(neocorticalMemoryROI ~ delay*emotion +
                     (1 | Name)+(1|set), data = EncPercSimDf)
       summary(LMM)#
       
-      LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                    (1 | Name), data = EncPercSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(angularGyrus_R ~ delay*emotion +
-                    (1 | Name)+(1|set), data = EncPercSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(Precuneus ~ delay*emotion +
-                    (1 | Name)+(1|set), data = EncPercSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(vmPFC ~ delay*emotion +
-                    (1 | Name), data = EncPercSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(IFG ~ delay*emotion +
-                    (1 | Name)+(1|set), data = EncPercSimDf)
-      summary(LMM)#
-      
-      LMM <- lmer(aCC ~ delay*emotion +
-                    (1 | Name), data = EncPercSimDf)
-      summary(LMM)#
+      file_name = "LMM_EncPerSim_neoc"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
       
       LMM <- lmer(occPole ~ delay*emotion +
                     (1 | Name)+(1|set), data = EncPercSimDf)
       summary(LMM)#
       
+      file_name = "LMM_EncPerSim_occ"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
+      
       LMM <- lmer(HeschlGyrus ~ delay*emotion +
-                    (1 | Name)+(1|set), data = EncPercSimDf)
+                    (1 | Name), data = EncPercSimDf)
       summary(LMM)#
+      
+      file_name = "LMM_EncPerSim_heschl"
+      result <- get_LMM_results(LMM = LMM)
+      ft <- create_LMM_table(result=result, file_name = file_name)
+      
+   # add Supplementary Table 17 to source data file ####    
+      subset_df <- EncPercSimDf %>%
+        dplyr::select(Name, emotion, delay, set, neocorticalMemoryROI, occPole, HeschlGyrus) 
+      subset_df <- merge(subset_df, controlDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
+      
+      addWorksheet(wb, "SupplementaryTable17")
+      writeData(wb, "SupplementaryTable17", subset_df)
     
 # VALENCE & AROUSAL RATING####
   # prepare data ####
     emoRatingsDf <- aggregate(cbind(arousalRating, valenceRating) ~ Name + delay + emotion, 
-                        FUN = mean, data = behavDf) 
+                        FUN = mean, data = behavDf) %>%
+                    mutate(delay = factor(delay),
+                           emotion = factor(emotion))
         
   # analyze data ####
+    
     psych::describeBy(cbind(arousalRating, valenceRating) ~ emotion, data = meanDf)
     
-    with(emoRatingsDf, t.test(arousalRating ~ emotion, paired = TRUE))
-    with(emoRatingsDf, cohensD(x = arousalRating[emotion == "negative"],
-                               y = arousalRating[emotion == "neutral"], method = "paired"))
+    # arousal  
+    title <- "arousal Rating"
+    ttest <- with(emoRatingsDf, t.test(arousalRating ~ emotion, paired = TRUE))
+    eff <- cohen.d(emoRatingsDf$arousalRating, emoRatingsDf$emotion, alpha = 0.05)
+    table_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
     
-    with(emoRatingsDf, t.test(valenceRating ~ emotion, paired = TRUE))
-    with(emoRatingsDf, cohensD(x = valenceRating[emotion == "negative"],
-                               y = valenceRating[emotion == "neutral"], method = "paired"))
+    # valence
+    title <- "valence Rating"
+    ttest <- with(emoRatingsDf, t.test(valenceRating ~ emotion, paired = TRUE))
+    eff <- cohen.d(emoRatingsDf$valenceRating, emoRatingsDf$emotion, alpha = 0.05)
+    table_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
+    table_df
 
-    # DIFFERENCE BETWEEN D2 AND D3 IN DELAY BETWEEN GROUPS ####
+# DIFFERENCE BETWEEN D2 AND D3 IN DELAY BETWEEN GROUPS ####
     describe(controlDf$delayD3)
     
-    with(controlDf, t.test(delayD3 ~ delay))
-    with(controlDf, cohensD(delayD3 ~ delay, method="unequal"))
+    title <- "difference between delay groups in day3 timing"
+    ttest <- with(controlDf, t.test(delayD3 ~ delay))
+    eff <- cohen.d(controlDf$delayD3, controlDf$delay, alpha = 0.05)
+    table_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
+    table_df
     
-    # QUESTIONNAIRES ####
-    #BDI
-    with(controlDf, t.test(BDI_SUM ~ delay))
-    with(controlDf, cohensD(BDI_SUM ~ delay, method="unequal"))
-    
-    #TICS
-    with(controlDf, t.test(TICS_SSCS ~ delay))
-    with(controlDf, cohensD(TICS_SSCS ~ delay, method="unequal"))
-    
+# QUESTIONNAIRES ####
+
     #STAI - state
-    with(controlDf, t.test(STAI_State_SUM ~ delay))
-    with(controlDf, cohensD(STAI_State_SUM ~ delay, method="unequal"))
+    title <- "delay in stai state"
+    ttest <- with(controlDf, t.test(STAI_State_SUM ~ delay))
+    eff <-  cohen.d(controlDf$STAI_State_SUM, controlDf$delay, alpha = 0.05)
+    table_df <- get_manual_contrasts(ttest=ttest, eff=eff, title=title)
     
     #STAI- trait
-    with(controlDf, t.test(STAI_Trait_SUM ~ delay))
-    with(controlDf, cohensD(STAI_Trait_SUM ~ delay, method="unequal"))
+    title <- "delay in stai trait"
+    ttest <- with(controlDf, t.test(STAI_Trait_SUM ~ delay))
+    eff <-  cohen.d(controlDf$STAI_Trait_SUM, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
     
     #PSQI
     
     #28d
-    
-    #24h
-    with(controlDf, t.test(PSQI_28d_SUM ~ delay))
-    with(controlDf, cohensD(PSQI_28d_SUM ~ delay, method="unequal"))
+    title <- "delay in psqi 28d"
+    ttest <- with(controlDf, t.test(PSQI_28d_SUM ~ delay))
+    eff <-  cohen.d(controlDf$PSQI_28d_SUM, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
     
     psych::describeBy(controlDf$PSQI_28d_SUM , group = controlDf$delay)
     
+    #24h - sleep quality
+    title <- "24h sleep quality"
+    ttest <- with(controlDf, t.test(PSQI_24h_6 ~ delay))
+    eff <-  cohen.d(controlDf$PSQI_24h_6, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
+    
     #24h - sleep duration
-    with(controlDf, t.test(PSQI_24h_4 ~ delay))
-    with(controlDf, cohensD(PSQI_24h_4 ~ delay, method="unequal"))
+    title <- "PSQI 24h sleep duration"
+    ttest <- with(controlDf, t.test(PSQI_24h_4 ~ delay))
+    eff <-  cohen.d(controlDf$PSQI_24h_4, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
     
     psych::describeBy(controlDf$PSQI_24h_4 , group = controlDf$delay)
     
-    #24h - sleep quality
-    with(controlDf, t.test(PSQI_24h_6 ~ delay))
-    with(controlDf, cohensD(PSQI_24h_6 ~ delay, method="unequal"))
+    #BDI
+    title <- "difference between delay groups in BDI"
+    ttest <- with(controlDf, t.test(BDI_SUM ~ delay))
+    eff <-  cohen.d(controlDf$BDI_SUM, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
+    
+    #TICS
+    title <-  "difference between delay groups in TICS"
+    ttest <- with(controlDf, t.test(TICS_SSCS ~ delay))
+    eff <-  cohen.d(controlDf$TICS_SSCS, controlDf$delay, alpha = 0.05)
+    table_df <- rbind(table_df, get_manual_contrasts(ttest=ttest, eff=eff, title=title))
+    
+    save_postHoc_t_text(table_df = table_df, header_row ="questionnaire data")
+    
     
     psych::describeBy(controlDf$PSQI_24h_6 , group = controlDf$delay)
     
-    # write to source data file ####
-    # add to source data file ####
+    
+    
+    # write Supplementary Table to source data file ####
+    # add to source data file #
     subset_df <- controlDf %>%
       dplyr::select(Name, delay, STAI_State_SUM, STAI_Trait_SUM,
                     PSQI_28d_SUM, PSQI_24h_4, PSQI_24h_6, 
-                    BDI_SUM, TICS_SSCS) %>%
+                    BDI_SUM, TICS_SSCS, sex) %>%
       dplyr::rename(state_anxiety = STAI_State_SUM,
                     trait_anxiety = STAI_Trait_SUM,
                     PSQI_globalScore_28d = PSQI_28d_SUM, 
@@ -3306,8 +4630,8 @@
                     depressiveMood = BDI_SUM, 
                     subjectiveChronicStress = TICS_SSCS) 
     
-    addWorksheet(wb, "SupplementaryTable4")
-    writeData(wb, "SupplementaryTable4", subset_df)
+    addWorksheet(wb, "SupplementaryTable18")
+    writeData(wb, "SupplementaryTable18", subset_df)
     
 # BEHAVIORAL PILOT####
   # sociodemographics ####
@@ -3322,38 +4646,61 @@
   
   # results for all pilot sets####
     # prepare data 
-      perRating_PilotDf  <- aggregate(rating ~ Name + lureType + emotion, FUN = mean, data = subset(pilotAllSetsDf, ratingScale == "Per"))
-      semRating_PilotDf  <- aggregate(rating ~ Name + lureType + emotion, FUN = mean, data = subset(pilotAllSetsDf, ratingScale == "Sem"))
+      perRating_PilotDf  <- aggregate(rating ~ Name + lureType + emotion, 
+                                      FUN = mean, data = subset(pilotAllSetsDf, 
+                                                                ratingScale == "Per"))
+      semRating_PilotDf  <- aggregate(rating ~ Name + lureType + emotion, 
+                                      FUN = mean, data = subset(pilotAllSetsDf, 
+                                                                ratingScale == "Sem"))
     # analyze data 
       # perceptual relatedness Rating
         # run ANOVA 
-        perRating.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"rating"
           ,perRating_PilotDf
           ,within=c("emotion","lureType")
           ,anova_table="pes")
-        print(perRating.ANOVA)
-        summary(perRating.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        row_header = "per rating in pilot ANOVA"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = row_header)
         # post hoc tests 
-        #difference in perceptual relatedness rating between lures
-        perRating.emmeansLure <- emmeans (perRating.ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-        summary(perRating.emmeansLure, adjust="sidak") # sidak adjustment when needed
+        title = "difference in perceptual relatedness rating between lures"
+        emmeans <- emmeans (ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite", 
+                            adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans) # sidak adjustment when needed
+        table_df <- compute_effect_size_paired(emmeans = emmeans, data = perRating_PilotDf, 
+                                   within_variable = "lureType", response_variable = "rating")
+        save_postHoc_t_text(header_row = title, 
+                            table_df = table_df, start_col = 2)
       
       # semantic relatedness Rating 
         # run ANOVA 
-          semRating.ANOVA <- aov_ez(
+          ANOVA <- aov_ez(
             "Name"
             ,"rating"
             ,semRating_PilotDf
             ,within=c("emotion","lureType")
             ,anova_table="pes")
-          print(perRating.ANOVA)
-          summary(perRating.ANOVA)
+          print(ANOVA)
+          summary(ANOVA)
+          
+          row_header = "sem rating in pilot ANOVA"
+          table_df <- get_ANOVA_results(ANOVA = ANOVA)
+          save_ANOVA_text(table_df = table_df, title = row_header)
     
         # post hoc tests
-          semRating.emmeansLure <- emmeans (semRating.ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-          summary(semRating.emmeansLure, adjust="sidak") # sidak adjustment when needed
+          title = "difference in semantic relatedness rating between lures"
+          emmeans <- emmeans (ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
+          summary(emmeans, adjust="sidak") # sidak adjustment when needed
+          
+          table_df <- compute_effect_size_paired(emmeans = emmeans, data = perRating_PilotDf, 
+                                                 within_variable = "lureType", response_variable = "rating")
+          save_postHoc_t_text(header_row = title, 
+                              table_df = table_df, start_col = 2)
     
   # results of final sets ####
     # descriptive statistics
@@ -3361,52 +4708,60 @@
                           data = pilotFinalSetsDf)    
           
       psych::describeBy(rating ~ lureType + ratingScale, data = meanDf)
+      
+  # semantic relatedness Rating ####
+    # run ANOVA
+      ANOVA <- aov_ez(
+        "Name"
+        ,"rating"
+        ,subset(pilotFinalSetsDf, ratingScale == "semantic relatedness")
+        ,within=c("emotion","lureType")
+        ,anova_table="pes")
+      print(ANOVA)
+      summary(ANOVA)
+      
+      row_header = "sem rating in pilot final set ANOVA"
+      
+      table_df <- get_ANOVA_results(ANOVA = ANOVA)
+      save_ANOVA_text(table_df = table_df, title = row_header)
+      
+      # post hoc tests
+      emmeans <- emmeans (ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
+      summary(emmeans, adjust="sidak") # sidak adjustment when needed
+      data = subset(pilotFinalSetsDf, ratingScale == "semantic relatedness") %>%
+        mutate(lureType = gsub(" ", ".", lureType)) # change levels of lure type to how emmeans renames them
+      
+      table_df <- compute_effect_size_paired(emmeans = emmeans, data = data, 
+                                             within_variable = "lureType", response_variable = "rating")
+      save_postHoc_t_text(header_row = row_header, 
+                          table_df = table_df, start_col = 2)
   
     # perceptual relatedness Rating####
       # run ANOVA 
-        perRating.ANOVA <- aov_ez(
+        ANOVA <- aov_ez(
           "Name"
           ,"rating"
           ,subset(pilotFinalSetsDf, ratingScale == "perceptual relatedness")
           ,within=c("emotion","lureType")
           ,anova_table="pes")
-        print(perRating.ANOVA)
-        summary(perRating.ANOVA)
+        print(ANOVA)
+        summary(ANOVA)
+        
+        row_header = "per rating in pilot final set ANOVA"
+        table_df <- get_ANOVA_results(ANOVA = ANOVA)
+        save_ANOVA_text(table_df = table_df, title = row_header)
+        
       # post hoc tests 
-        #difference in perceptual relatedness rating between lures
-        perRating.emmeansDelayLure <- emmeans (perRating.ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-        summary(perRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
+        title = "difference in perceptual relatedness rating between lures"
+        emmeans <- emmeans (ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite", adjust="sidak") # satterwhaite for fastening up computation, does not change results of contrasts
+        summary(emmeans) # sidak adjustment when needed
+        data = subset(pilotFinalSetsDf, ratingScale == "perceptual relatedness") %>%
+          mutate(lureType = gsub(" ", ".", lureType)) # change levels of lure type to how emmeans renames them
         
-        with(meanDf, cohensD(x = rating[lureType == "semantically related" & ratingScale == "perceptual relatedness"], 
-                             y = rating[lureType == "perceptually related" & ratingScale == "perceptual relatedness"],
-                             method="paired"))
-        
-        with(meanDf, cohensD(x = rating[lureType == "perceptually related" & ratingScale == "perceptual relatedness"], 
-                             y = rating[lureType == "unrelated" & ratingScale == "perceptual relatedness"],
-                             method="paired"))
-        
-    # semantic relatedness Rating ####
-      # run ANOVA
-        semRating.ANOVA <- aov_ez(
-          "Name"
-          ,"rating"
-          ,subset(pilotFinalSetsDf, ratingScale == "semantic relatedness")
-          ,within=c("emotion","lureType")
-          ,anova_table="pes")
-        print(semRating.ANOVA)
-        summary(semRating.ANOVA)
-      
-      # post hoc tests
-        semRating.emmeansDelayLure <- emmeans (semRating.ANOVA, pairwise ~ lureType, lmer.df = "satterthwaite") # satterwhaite for fastening up computation, does not change results of contrasts
-        summary(semRating.emmeansDelayLure, adjust="sidak") # sidak adjustment when needed
-        
-        with(meanDf, cohensD(x = rating[lureType == "semantically related" & ratingScale == "semantic relatedness"], 
-                             y = rating[lureType == "perceptually related" & ratingScale == "semantic relatedness"],
-                             method="paired"))
-        
-        with(meanDf, cohensD(x = rating[lureType == "semantically related" & ratingScale == "semantic relatedness"], 
-                             y = rating[lureType == "unrelated" & ratingScale == "semantic relatedness"],
-                             method="paired"))
+        table_df <- compute_effect_size_paired(emmeans = emmeans, data = data, 
+                                               within_variable = "lureType", response_variable = "rating")
+        save_postHoc_t_text(header_row = title, 
+                            table_df = table_df, start_col = 2)
         
     # Supplementary Figure 1 RelatednessRating in Pilot ####
   
@@ -3466,8 +4821,8 @@
       dev.off()
   
 
-    # save to source data file ####
-      subset_df <- pilotFinalSetsDf
+    # save SupplementaryFigure1 to source data file ####
+      subset_df <- merge(pilotFinalSetsDf, pilotDemoBeforeExclusionDf[, c("Name", "sex")], by = "Name", all.x = TRUE) # include sex in source data file
       
       addWorksheet(wb, "SupplementaryFigure1")
       writeData(wb, "SupplementaryFigure1", subset_df)
