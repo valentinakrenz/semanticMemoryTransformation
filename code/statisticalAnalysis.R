@@ -347,47 +347,28 @@ options(scipen=999) # 999 if you don't want scientific notation for p-values
     return(table_df) # return the entire data frame outside the loop
   }
   
-  # get ci for partial eta squared # from etaSquaredCI.R
-  # this function is required by the following function
-  get_partial_eta2_from_lambda <- function(lambda, df1, df2)  {
-    partial_eta2 <- lambda / (lambda + df1 + df2 + 1)
-    return(partial_eta2)
+  # get ci for partial eta squared 
+  compute_eta_squared_CI <- function(ANOVA, row_index){
+    # Given F value, numerator df (effect df) and denominator df (error df)
+    F_val <- ANOVA$anova_table$F[row_index]
+    df_num <- ANOVA$anova_table$'num Df'[row_index]
+    df_error <- ANOVA$anova_table$'den Df'[row_index]
+    
+    # Calculate non-central parameter
+    lambda <- F_val * df_num
+    
+    # Calculate critical F values for 95% CI
+    alpha <- 0.05
+    F_lower <- qf(alpha / 2, df_num, df_error, lambda, lower.tail=TRUE)
+    F_upper <- qf(1 - alpha / 2, df_num, df_error, lambda)
+    
+    # Convert to partial eta squared
+    eta_lower <- df_num * F_lower / (df_num * F_lower + df_error)
+    eta_upper <- df_num * F_upper / (df_num * F_upper + df_error)
+    
+    return(list(lower = eta_lower, upper = eta_upper))
   }
-  # computes ci for partial eta squared # from etaSquaredCI.R
-  get.ci.partial.eta.squared <- function(F.value, df1, df2, conf.level=.95) {
-    F_value <- F.value
-    
-    conf_level <- conf.level
-    
-    LL_partial_eta2 <- NA
-    UL_partial_eta2 <- NA
-    
-    if (requireNamespace("MBESS", quietly = TRUE)) {
-      F_limits <- MBESS::conf.limits.ncf(F=F_value, df.1=df1, df.2=df2, conf.level=conf_level)
-      LL_lambda <- F_limits$Lower.Limit
-      UL_lambda <- F_limits$Upper.Limit
-      
-      
-      LL_partial_eta2 <- get_partial_eta2_from_lambda(lambda=LL_lambda, df1=df1, df2=df2)
-      UL_partial_eta2 <- get_partial_eta2_from_lambda(lambda=UL_lambda, df1=df1, df2=df2)
-      
-      
-      if (is.na(LL_partial_eta2)) {
-        LL_partial_eta2 <- 0
-      }
-      
-      if (is.na(UL_partial_eta2)) {
-        UL_partial_eta2 <- 1
-      }
-    } else {
-      cat("\nMBESS package needs to be installed to calculate eta-squared confidence intervals.\n")
-    }
-    
-    output <- list()
-    output$LL <- LL_partial_eta2
-    output$UL <- UL_partial_eta2
-    return(output)
-  }
+  
   
   # bring ANOVA results to a nice table and get ci
   get_ANOVA_results <- function(ANOVA=ANOVA) {
@@ -400,17 +381,12 @@ options(scipen=999) # 999 if you don't want scientific notation for p-values
     # Initialize new columns to store the lower and upper limits of the confidence intervals
     table_df$LL_CI <- NA
     table_df$UL_CI <- NA
-    
+    alpha = 0.05
     # Loop through each variable and compute the 95% confidence interval
     for (i in 1:nrow(table_df)) {
-      ci <- get.ci.partial.eta.squared(
-        F.value = table_df$F[i],
-        df1 = table_df$"num Df"[i],
-        df2 = table_df$"den Df"[i],
-        conf.level = 0.95
-      )
-      table_df$LL_CI[i] <- ci$LL
-      table_df$UL_CI[i] <- ci$UL
+      ci <- compute_eta_squared_CI(ANOVA, row_index=i)
+      table_df$LL_CI[i] <- ci$lower
+      table_df$UL_CI[i] <- ci$upper
     }
     
     # Reorganize columns
@@ -435,7 +411,6 @@ options(scipen=999) # 999 if you don't want scientific notation for p-values
     
     return(table_df)
   }
-  
   # save in text file
   save_ANOVA_text <- function(table_df=table_df, title, file_name = "output", show_file = TRUE) {
     # Add the .txt extension to the file name
